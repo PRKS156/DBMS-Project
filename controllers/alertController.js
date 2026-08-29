@@ -8,7 +8,7 @@ exports.triggerAlert = async (req, res) => {
     }
 
     try {
-        // High-performance spatial query using explicit lowercase table and column names matching Supabase
+        // High-performance spatial query leveraging PostGIS ST_DistanceSphere algorithm mapping functions
         const queryText = `
             SELECT 
                 d.doctorid, d.fullname, d.phonenumber, d.specialization,
@@ -30,8 +30,10 @@ exports.triggerAlert = async (req, res) => {
             });
         }
 
+        // FIX: Extract the first single row object index [0] out of the rows array
         const closestDoctor = result.rows[0]; 
         
+        // Format the mathematical metric into a readable string string mapping layout
         const distanceFormatted = closestDoctor.distance_meters > 1000 
             ? `${(closestDoctor.distance_meters / 1000).toFixed(2)} km`
             : `${Math.round(closestDoctor.distance_meters)} meters`;
