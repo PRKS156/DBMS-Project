@@ -49,11 +49,14 @@ exports.triggerAlert = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("❌ Query Failure:", error.message);
-        return res.status(500).json({ 
-            success: false, 
-            message: "Database query failed.",
-            debug: error.message 
-        });
-    }
+    const realMessage = error.errors?.length 
+        ? error.errors.map(e => e.message).join(' | ') 
+        : error.message || error.code || 'Unknown error (no message)';
+    console.error("❌ Query Failure:", realMessage);
+    return res.status(500).json({ 
+        success: false, 
+        message: "Database query failed.",
+        debug: realMessage 
+    });
+}
 };
