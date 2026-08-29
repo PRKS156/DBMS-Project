@@ -1,47 +1,56 @@
-const db = require('../config/db');
+const pool = require('../config/db.js');
 
-exports.triggerEmergency = async (req, res) => {
+exports.triggerAlert = async (req, res) => {
     const { patientId, latitude, longitude } = req.body;
 
     if (!latitude || !longitude) {
-        return res.status(400).json({ error: "Latitude and Longitude are strictly required." });
+        return res.status(400).json({ success: false, message: "Missing hardware GPS coordinates coordinates inputs parameters." });
     }
 
     try {
-        const findNearestQuery = `
-            SELECT da.DoctorID, d.FullName, d.PhoneNumber,
-                   ST_DistanceSphere(da.CurrentLocation, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS distance_meters
-            FROM DOCTOR_AVAILABILITY da
-            JOIN DOCTOR d ON da.DoctorID = d.DoctorID
+        // High-performance spatial query leveraging PostGIS ST_DistanceSphere algorithm mapping functions
+        const queryText = `
+            SELECT 
+                d.DoctorID, d.FullName, d.PhoneNumber, d.Specialization,
+                ST_DistanceSphere(da.CurrentLocation, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS distance_meters
+            FROM DOCTOR d
+            INNER JOIN DOCTOR_AVAILABILITY da ON d.DoctorID = da.DoctorID
             WHERE da.Status = 'Available'
             ORDER BY distance_meters ASC
             LIMIT 1;
         `;
 
-        const result = await db.query(findNearestQuery, [longitude, latitude]);
+        const values = [longitude, latitude];
+        const result = await pool.query(queryText, values);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ 
-                status: "Failed", 
-                message: "Emergency logged, but no doctors are currently available nearby." 
+            return res.status(200).json({ 
+                success: false, 
+                message: "Server processed records, but no physicians are active." 
             });
         }
 
-        const nearestDoctor = result.rows[0];
+       // --- REPLACE THE BOTTOM OF YOUR CONTROLLER WITH THIS LOWERCASE VERSION ---
+        const closestDoctor = result.rows[0];
+        const distanceFormatted = closestDoctor.distance_meters > 1000 
+            ? `${(closestDoctor.distance_meters / 1000).toFixed(2)} km`
+            : `${Math.round(closestDoctor.distance_meters)} meters`;
 
         return res.status(200).json({
-            status: "Success",
-            message: "Emergency matched! Dispatching closest medical personnel.",
+            success: true,
+            message: "Closest qualified available medical specialist dispatched successfully.",
             dispatchedDoctor: {
-                id: nearestDoctor.doctorid,
-                name: nearestDoctor.fullname,
-                phone: nearestDoctor.phonenumber,
-                distance: `${Math.round(nearestDoctor.distance_meters)} meters`
+                id: closestDoctor.doctorid,          // Changed to full lowercase keys
+                name: closestDoctor.fullname,        // Changed to full lowercase keys
+                phone: closestDoctor.phonenumber,    // Changed to full lowercase keys
+                specialization: closestDoctor.specialization, // Changed to full lowercase keys
+                distance: distanceFormatted
             }
         });
 
+
     } catch (error) {
-        console.error("🚨 Controller Error:", error.message);
-        return res.status(500).json({ error: "Internal server error during dispatch calculation." });
+        console.error("❌ PostGIS Query Processing Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Internal Engine Data Transaction Exception." });
     }
 };
