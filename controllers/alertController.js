@@ -4,7 +4,7 @@ exports.triggerAlert = async (req, res) => {
     const { patientId, latitude, longitude } = req.body;
 
     if (!latitude || !longitude) {
-        return res.status(400).json({ success: false, message: "Missing hardware GPS coordinates coordinates inputs parameters." });
+        return res.status(400).json({ success: false, message: "Missing hardware GPS coordinate parameters." });
     }
 
     try {
@@ -30,8 +30,10 @@ exports.triggerAlert = async (req, res) => {
             });
         }
 
-       // --- REPLACE THE BOTTOM OF YOUR CONTROLLER WITH THIS LOWERCASE VERSION ---
-        const closestDoctor = result.rows[0];
+        // Fix: Isolate the single row object from the rows array matrix
+        const closestDoctor = result.rows[0]; 
+        
+        // Format the mathematical metric into a readable string
         const distanceFormatted = closestDoctor.distance_meters > 1000 
             ? `${(closestDoctor.distance_meters / 1000).toFixed(2)} km`
             : `${Math.round(closestDoctor.distance_meters)} meters`;
@@ -40,14 +42,13 @@ exports.triggerAlert = async (req, res) => {
             success: true,
             message: "Closest qualified available medical specialist dispatched successfully.",
             dispatchedDoctor: {
-                id: closestDoctor.doctorid,          // Changed to full lowercase keys
-                name: closestDoctor.fullname,        // Changed to full lowercase keys
-                phone: closestDoctor.phonenumber,    // Changed to full lowercase keys
-                specialization: closestDoctor.specialization, // Changed to full lowercase keys
+                id: closestDoctor.doctorid,          // PostgreSQL returns columns in pure lowercase
+                name: closestDoctor.fullname,        // PostgreSQL returns columns in pure lowercase
+                phone: closestDoctor.phonenumber,    // PostgreSQL returns columns in pure lowercase
+                specialization: closestDoctor.specialization, // PostgreSQL returns columns in pure lowercase
                 distance: distanceFormatted
             }
         });
-
 
     } catch (error) {
         console.error("❌ PostGIS Query Processing Failure:", error.message);
