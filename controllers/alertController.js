@@ -3,8 +3,11 @@ const pool = require('../config/db.js');
 exports.triggerAlert = async (req, res) => {
     const { patientId, latitude, longitude } = req.body;
 
-    if (!latitude || !longitude) {
-        return res.status(400).json({ success: false, message: "Missing GPS coordinates." });
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+
+    if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({ success: false, message: "Missing or invalid GPS coordinates." });
     }
 
     try {
@@ -19,8 +22,7 @@ exports.triggerAlert = async (req, res) => {
             LIMIT 1;
         `;
 
-        const values = [longitude, latitude];
-        const result = await pool.query(queryText, values);
+        const result = await pool.query(queryText, [lng, lat]);
 
         if (result.rows.length === 0) {
             return res.status(200).json({ 
@@ -47,8 +49,6 @@ exports.triggerAlert = async (req, res) => {
         });
 
     } catch (error) {
-        // TEMPORARY: send the real error back so we can see it directly.
-        // Remove the "debug" field before final submission.
         console.error("❌ Query Failure:", error.message);
         return res.status(500).json({ 
             success: false, 
