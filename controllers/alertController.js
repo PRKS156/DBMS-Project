@@ -8,14 +8,14 @@ exports.triggerAlert = async (req, res) => {
     }
 
     try {
-        // High-performance spatial query leveraging PostGIS ST_DistanceSphere algorithm mapping functions
+        // High-performance spatial query using explicit lowercase table and column names matching Supabase
         const queryText = `
             SELECT 
-                d.DoctorID, d.FullName, d.PhoneNumber, d.Specialization,
-                ST_DistanceSphere(da.CurrentLocation, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS distance_meters
-            FROM DOCTOR d
-            INNER JOIN DOCTOR_AVAILABILITY da ON d.DoctorID = da.DoctorID
-            WHERE da.Status = 'Available'
+                d.doctorid, d.fullname, d.phonenumber, d.specialization,
+                ST_DistanceSphere(da.currentlocation, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS distance_meters
+            FROM doctor d
+            INNER JOIN doctor_availability da ON d.doctorid = da.doctorid
+            WHERE da.status = 'Available'
             ORDER BY distance_meters ASC
             LIMIT 1;
         `;
@@ -30,10 +30,8 @@ exports.triggerAlert = async (req, res) => {
             });
         }
 
-        // Fix: Isolate the single row object from the rows array matrix
         const closestDoctor = result.rows[0]; 
         
-        // Format the mathematical metric into a readable string
         const distanceFormatted = closestDoctor.distance_meters > 1000 
             ? `${(closestDoctor.distance_meters / 1000).toFixed(2)} km`
             : `${Math.round(closestDoctor.distance_meters)} meters`;
@@ -42,10 +40,10 @@ exports.triggerAlert = async (req, res) => {
             success: true,
             message: "Closest qualified available medical specialist dispatched successfully.",
             dispatchedDoctor: {
-                id: closestDoctor.doctorid,          // PostgreSQL returns columns in pure lowercase
-                name: closestDoctor.fullname,        // PostgreSQL returns columns in pure lowercase
-                phone: closestDoctor.phonenumber,    // PostgreSQL returns columns in pure lowercase
-                specialization: closestDoctor.specialization, // PostgreSQL returns columns in pure lowercase
+                id: closestDoctor.doctorid,          
+                name: closestDoctor.fullname,        
+                phone: closestDoctor.phonenumber,    
+                specialization: closestDoctor.specialization, 
                 distance: distanceFormatted
             }
         });
