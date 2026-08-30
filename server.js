@@ -13,6 +13,8 @@ app.use(express.json());
 app.use('/api/alerts', alertRoutes);
 const doctorRoutes = require('./routes/doctorRoutes');
 const patientRoutes = require('./routes/patientRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+app.use('/api/admin', adminRoutes);
 
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/patients', patientRoutes);
