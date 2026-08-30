@@ -36,3 +36,35 @@ exports.getAllData = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to fetch admin data.", debug: error.message });
     }
 };  
+exports.deleteDoctor = async (req, res) => {
+    const providedPassword = req.headers['x-admin-password'];
+    if (!providedPassword || providedPassword !== process.env.ADMIN_PASSWORD) {
+        return res.status(401).json({ success: false, message: "Invalid admin password." });
+    }
+
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM doctor_availability WHERE doctorid = $1', [id]);
+        await pool.query('DELETE FROM doctor WHERE doctorid = $1', [id]);
+        return res.status(200).json({ success: true, message: "Doctor deleted." });
+    } catch (error) {
+        console.error("❌ Delete Doctor Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Delete failed.", debug: error.message });
+    }
+};
+
+exports.deletePatient = async (req, res) => {
+    const providedPassword = req.headers['x-admin-password'];
+    if (!providedPassword || providedPassword !== process.env.ADMIN_PASSWORD) {
+        return res.status(401).json({ success: false, message: "Invalid admin password." });
+    }
+
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM patient WHERE patientid = $1', [id]);
+        return res.status(200).json({ success: true, message: "Patient deleted." });
+    } catch (error) {
+        console.error("❌ Delete Patient Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Delete failed.", debug: error.message });
+    }
+};
