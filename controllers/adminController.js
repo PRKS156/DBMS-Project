@@ -18,12 +18,12 @@ exports.getAllData = async (req, res) => {
         `);
 
         const patientsResult = await pool.query(`
-            SELECT patientid, fullname, phonenumber,
-                   ST_Y(lastlocation) AS latitude, ST_X(lastlocation) AS longitude,
-                   registeredat
-            FROM patient
-            ORDER BY patientid DESC;
-        `);
+    SELECT patientid, fullname, age, gender, bloodgroup, phonenumber,
+           ST_Y(lastlocation) AS latitude, ST_X(lastlocation) AS longitude,
+           registrationdate
+    FROM patient
+    ORDER BY patientid DESC;
+`);
 
         return res.status(200).json({
             success: true,

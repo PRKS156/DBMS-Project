@@ -1,18 +1,18 @@
 const pool = require('../config/db.js');
 
 exports.registerPatient = async (req, res) => {
-    const { fullName, phoneNumber, latitude, longitude } = req.body;
+    const { fullName, age, gender, bloodGroup, phoneNumber, latitude, longitude } = req.body;
 
-    if (!fullName || !phoneNumber || !latitude || !longitude) {
-        return res.status(400).json({ success: false, message: "Name, phone, and location are required." });
+    if (!fullName || !age || !gender || !bloodGroup || !phoneNumber || !latitude || !longitude) {
+        return res.status(400).json({ success: false, message: "All fields and location are required." });
     }
 
     try {
         const result = await pool.query(
-            `INSERT INTO patient (fullname, phonenumber, lastlocation)
-             VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326))
+            `INSERT INTO patient (fullname, age, gender, bloodgroup, phonenumber, lastlocation)
+             VALUES ($1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($6, $7), 4326))
              RETURNING patientid`,
-            [fullName, phoneNumber, parseFloat(longitude), parseFloat(latitude)]
+            [fullName, age, gender, bloodGroup, phoneNumber, parseFloat(longitude), parseFloat(latitude)]
         );
 
         return res.status(201).json({ success: true, message: "Patient registered.", patientId: result.rows[0].patientid });
