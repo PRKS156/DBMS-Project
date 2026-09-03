@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const alertController = require('../controllers/alertController');
 
-// Cleanly map the POST sub-route endpoint path directly to the named controller function
 router.post('/trigger', alertController.triggerAlert);
+router.get('/doctor/:doctorId', alertController.getDoctorAlerts);
+router.patch('/:id/acknowledge', alertController.acknowledgeAlert);
 
 module.exports = router;

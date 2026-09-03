@@ -1,7 +1,7 @@
 const pool = require('../config/db.js');
 
 exports.triggerAlert = async (req, res) => {
-    const { patientId, latitude, longitude, requiredSpecialization } = req.body;
+    const { patientId, latitude, longitude, requiredSpecialization, floor, roomNumber, bedNumber } = req.body;
 
     const lat = parseFloat(latitude);
     const lng = parseFloat(longitude);
@@ -14,7 +14,6 @@ exports.triggerAlert = async (req, res) => {
         let closestDoctor = null;
         let isFallback = false;
 
-        // Attempt 1: find the nearest AVAILABLE doctor matching the required specialization
         if (requiredSpecialization && requiredSpecialization !== 'Unsure / General') {
             const specialistQuery = `
                 SELECT 
@@ -27,12 +26,9 @@ exports.triggerAlert = async (req, res) => {
                 LIMIT 1;
             `;
             const specialistResult = await pool.query(specialistQuery, [lng, lat, requiredSpecialization]);
-            if (specialistResult.rows.length > 0) {
-                closestDoctor = specialistResult.rows[0];
-            }
+            if (specialistResult.rows.length > 0) closestDoctor = specialistResult.rows[0];
         }
 
-        // Attempt 2 (fallback): if no matching specialist found, get the nearest available doctor of ANY specialization
         if (!closestDoctor) {
             isFallback = true;
             const generalQuery = `
@@ -46,17 +42,19 @@ exports.triggerAlert = async (req, res) => {
                 LIMIT 1;
             `;
             const generalResult = await pool.query(generalQuery, [lng, lat]);
-            if (generalResult.rows.length > 0) {
-                closestDoctor = generalResult.rows[0];
-            }
+            if (generalResult.rows.length > 0) closestDoctor = generalResult.rows[0];
         }
 
         if (!closestDoctor) {
-            return res.status(200).json({ 
-                success: false, 
-                message: "No physicians are currently available in your area."
-            });
+            return res.status(200).json({ success: false, message: "No physicians are currently available in your area." });
         }
+
+        // Log this dispatch as an active alert for the doctor to see
+        await pool.query(
+            `INSERT INTO alert (patientid, doctorid, floor, roomnumber, bednumber, status)
+             VALUES ($1, $2, $3, $4, $5, 'Pending')`,
+            [patientId || null, closestDoctor.doctorid, floor || null, roomNumber || null, bedNumber || null]
+        );
 
         const distanceFormatted = closestDoctor.distance_meters > 1000 
             ? `${(closestDoctor.distance_meters / 1000).toFixed(2)} km`
@@ -84,10 +82,36 @@ exports.triggerAlert = async (req, res) => {
             ? error.errors.map(e => e.message).join(' | ') 
             : error.message || error.code || 'Unknown error (no message)';
         console.error("❌ Query Failure:", realMessage);
-        return res.status(500).json({ 
-            success: false, 
-            message: "Database query failed.",
-            debug: realMessage 
-        });
+        return res.status(500).json({ success: false, message: "Database query failed.", debug: realMessage });
+    }
+};
+
+exports.getDoctorAlerts = async (req, res) => {
+    const { doctorId } = req.params;
+    try {
+        const result = await pool.query(
+            `SELECT a.alertid, a.floor, a.roomnumber, a.bednumber, a.status, a.createdat,
+                    p.fullname AS patientname, p.age, p.gender, p.bloodgroup, p.phonenumber AS patientphone
+             FROM alert a
+             LEFT JOIN patient p ON a.patientid = p.patientid
+             WHERE a.doctorid = $1 AND a.status = 'Pending'
+             ORDER BY a.createdat DESC`,
+            [doctorId]
+        );
+        return res.status(200).json({ success: true, alerts: result.rows });
+    } catch (error) {
+        console.error("❌ Get Alerts Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to fetch alerts.", debug: error.message });
+    }
+};
+
+exports.acknowledgeAlert = async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query(`UPDATE alert SET status = 'Acknowledged' WHERE alertid = $1`, [id]);
+        return res.status(200).json({ success: true, message: "Alert acknowledged." });
+    } catch (error) {
+        console.error("❌ Acknowledge Alert Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to acknowledge alert.", debug: error.message });
     }
 };
