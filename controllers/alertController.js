@@ -50,11 +50,13 @@ exports.triggerAlert = async (req, res) => {
         }
 
         // Log this dispatch as an active alert for the doctor to see
-        await pool.query(
+        const alertInsert = await pool.query(
             `INSERT INTO alert (patientid, doctorid, floor, roomnumber, bednumber, status)
-             VALUES ($1, $2, $3, $4, $5, 'Pending')`,
+             VALUES ($1, $2, $3, $4, $5, 'Pending')
+             RETURNING alertid`,
             [patientId || null, closestDoctor.doctorid, floor || null, roomNumber || null, bedNumber || null]
         );
+        const newAlertId = alertInsert.rows[0].alertid;
 
         const distanceFormatted = closestDoctor.distance_meters > 1000 
             ? `${(closestDoctor.distance_meters / 1000).toFixed(2)} km`
@@ -68,6 +70,7 @@ exports.triggerAlert = async (req, res) => {
             success: true,
             message: dispatchMessage,
             isFallback: isFallback,
+            alertId: newAlertId,
             dispatchedDoctor: {
                 id: closestDoctor.doctorid,
                 name: closestDoctor.fullname,
@@ -83,6 +86,26 @@ exports.triggerAlert = async (req, res) => {
             : error.message || error.code || 'Unknown error (no message)';
         console.error("❌ Query Failure:", realMessage);
         return res.status(500).json({ success: false, message: "Database query failed.", debug: realMessage });
+    }
+};
+exports.getAlertStatus = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query(
+            `SELECT a.alertid, a.status,
+                    d.fullname AS doctorname, d.phonenumber AS doctorphone, d.specialization
+             FROM alert a
+             LEFT JOIN doctor d ON a.doctorid = d.doctorid
+             WHERE a.alertid = $1`,
+            [id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Alert not found." });
+        }
+        return res.status(200).json({ success: true, alert: result.rows[0] });
+    } catch (error) {
+        console.error("❌ Get Alert Status Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to fetch alert status.", debug: error.message });
     }
 };
 
