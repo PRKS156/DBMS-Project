@@ -38,7 +38,7 @@ exports.triggerAlert = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "A qualified physician has been dispatched to your location."
+            message: "A qualified physician has been dispatched to your location.",
             dispatchedDoctor: {
                 id: closestDoctor.doctorid,
                 name: closestDoctor.fullname,
@@ -49,14 +49,14 @@ exports.triggerAlert = async (req, res) => {
         });
 
     } catch (error) {
-    const realMessage = error.errors?.length 
-        ? error.errors.map(e => e.message).join(' | ') 
-        : error.message || error.code || 'Unknown error (no message)';
-    console.error("❌ Query Failure:", realMessage);
-    return res.status(500).json({ 
-        success: false, 
-        message: "Database query failed.",
-        debug: realMessage 
-    });
-}
+        const realMessage = error.errors?.length 
+            ? error.errors.map(e => e.message).join(' | ') 
+            : error.message || error.code || 'Unknown error (no message)';
+        console.error("❌ Query Failure:", realMessage);
+        return res.status(500).json({ 
+            success: false, 
+            message: "Database query failed.",
+            debug: realMessage 
+        });
+    }
 };
