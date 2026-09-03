@@ -2,6 +2,10 @@ const pool = require('../config/db.js');
 
 exports.registerPatient = async (req, res) => {
     const { fullName, age, gender, bloodGroup, phoneNumber, latitude, longitude } = req.body;
+    const phoneRegex = /^[6-9]\d{9}$/;
+    if (!phoneRegex.test(phoneNumber)) {
+        return res.status(400).json({ success: false, message: "Invalid phone number format." });
+    }   
 
     if (!fullName || !age || !gender || !bloodGroup || !phoneNumber || !latitude || !longitude) {
         return res.status(400).json({ success: false, message: "All fields and location are required." });

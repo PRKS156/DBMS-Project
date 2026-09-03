@@ -27,7 +27,7 @@ exports.triggerAlert = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(200).json({ 
                 success: false, 
-                message: "No available doctors found in the database." 
+                message: "No physicians are currently available in your area."
             });
         }
 
@@ -38,7 +38,7 @@ exports.triggerAlert = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Closest doctor dispatched successfully.",
+            message: "A qualified physician has been dispatched to your location."
             dispatchedDoctor: {
                 id: closestDoctor.doctorid,
                 name: closestDoctor.fullname,
