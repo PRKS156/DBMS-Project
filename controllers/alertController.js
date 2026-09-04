@@ -93,16 +93,31 @@ exports.getAlertStatus = async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT a.alertid, a.status,
-                    d.fullname AS doctorname, d.phonenumber AS doctorphone, d.specialization
+                    d.fullname AS doctorname, d.phonenumber AS doctorphone, d.specialization,
+                    ST_DistanceSphere(da.currentlocation, p.lastlocation) AS distance_meters
              FROM alert a
              LEFT JOIN doctor d ON a.doctorid = d.doctorid
+             LEFT JOIN doctor_availability da ON d.doctorid = da.doctorid
+             LEFT JOIN patient p ON a.patientid = p.patientid
              WHERE a.alertid = $1`,
             [id]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, message: "Alert not found." });
         }
-        return res.status(200).json({ success: true, alert: result.rows[0] });
+
+        const alert = result.rows[0];
+        let distanceFormatted = null;
+        if (alert.distance_meters !== null) {
+            distanceFormatted = alert.distance_meters > 1000
+                ? `${(alert.distance_meters / 1000).toFixed(2)} km`
+                : `${Math.round(alert.distance_meters)} meters`;
+        }
+
+        return res.status(200).json({
+            success: true,
+            alert: { ...alert, distanceFormatted }
+        });
     } catch (error) {
         console.error("❌ Get Alert Status Failure:", error.message);
         return res.status(500).json({ success: false, message: "Failed to fetch alert status.", debug: error.message });
