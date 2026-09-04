@@ -1,7 +1,8 @@
 const pool = require('../config/db.js');
+const bcrypt = require('bcrypt');
 
 exports.registerDoctor = async (req, res) => {
-    const { fullName, phoneNumber, specialization, latitude, longitude } = req.body;
+    const { fullName, phoneNumber, specialization, latitude, longitude, password } = req.body;
     const phoneRegex = /^[6-9]\d{9}$/;
     if (!phoneRegex.test(phoneNumber)) {
         return res.status(400).json({ success: false, message: "Invalid phone number format." });
@@ -11,13 +12,19 @@ exports.registerDoctor = async (req, res) => {
         return res.status(400).json({ success: false, message: "All fields and location are required." });
     }
 
+    if (!password || password.length < 4) {
+        return res.status(400).json({ success: false, message: "Password must be at least 4 characters." });
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
+        const hashedPassword = await bcrypt.hash(password, 10);
+
         const doctorResult = await client.query(
-            `INSERT INTO doctor (fullname, phonenumber, specialization) VALUES ($1, $2, $3) RETURNING doctorid`,
-            [fullName, phoneNumber, specialization]
+            `INSERT INTO doctor (fullname, phonenumber, specialization, password) VALUES ($1, $2, $3, $4) RETURNING doctorid`,
+            [fullName, phoneNumber, specialization, hashedPassword]
         );
         const doctorId = doctorResult.rows[0].doctorid;
 
@@ -38,6 +45,52 @@ exports.registerDoctor = async (req, res) => {
         client.release();
     }
 };
+
+exports.loginDoctor = async (req, res) => {
+    const { doctorId, password } = req.body;
+
+    if (!doctorId || !password) {
+        return res.status(400).json({ success: false, message: "Doctor ID and password are required." });
+    }
+
+    try {
+        const result = await pool.query(
+            `SELECT doctorid, fullname, phonenumber, specialization, password FROM doctor WHERE doctorid = $1`,
+            [doctorId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "No doctor found with that ID." });
+        }
+
+        const doctor = result.rows[0];
+
+        if (!doctor.password) {
+            return res.status(401).json({ success: false, message: "This doctor has no password set. Please contact admin." });
+        }
+
+        const match = await bcrypt.compare(password, doctor.password);
+        if (!match) {
+            return res.status(401).json({ success: false, message: "Incorrect password." });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Login successful.",
+            doctor: {
+                doctorId: doctor.doctorid,
+                fullName: doctor.fullname,
+                phoneNumber: doctor.phonenumber,
+                specialization: doctor.specialization
+            }
+        });
+
+    } catch (error) {
+        console.error("❌ Doctor Login Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Login failed.", debug: error.message });
+    }
+};
+
 exports.updateLocation = async (req, res) => {
     const { id } = req.params;
     const { latitude, longitude } = req.body;
