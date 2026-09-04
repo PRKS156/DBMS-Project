@@ -30,7 +30,7 @@ exports.registerDoctor = async (req, res) => {
 
         await client.query(
             `INSERT INTO doctor_availability (doctorid, status, currentlocation)
-             VALUES ($1, 'Available', ST_SetSRID(ST_MakePoint($2, $3), 4326))`,
+            VALUES ($1, 'Off-Duty', ST_SetSRID(ST_MakePoint($2, $3), 4326))`,
             [doctorId, parseFloat(longitude), parseFloat(latitude)]
         );
 
