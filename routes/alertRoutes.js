@@ -5,4 +5,4 @@ router.post('/trigger', alertController.triggerAlert);
 router.get('/doctor/:doctorId', alertController.getDoctorAlerts);
 router.get('/:id/status', alertController.getAlertStatus);
 router.patch('/:id/acknowledge', alertController.acknowledgeAlert);
-module.exports = router;
+module.exports = router;   
