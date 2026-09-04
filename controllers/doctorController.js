@@ -129,3 +129,22 @@ exports.setStatus = async (req, res) => {
         return res.status(500).json({ success: false, message: "Status update failed.", debug: error.message });
     }
 };
+exports.subscribeToPush = async (req, res) => {
+    const { id } = req.params;
+    const subscription = req.body;
+
+    if (!subscription || !subscription.endpoint) {
+        return res.status(400).json({ success: false, message: "Invalid push subscription." });
+    }
+
+    try {
+        await pool.query(
+            `UPDATE doctor_availability SET push_subscription = $1 WHERE doctorid = $2`,
+            [JSON.stringify(subscription), id]
+        );
+        return res.status(200).json({ success: true, message: "Subscribed to push notifications." });
+    } catch (error) {
+        console.error("❌ Push Subscription Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Subscription failed.", debug: error.message });
+    }
+};

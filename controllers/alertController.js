@@ -1,3 +1,10 @@
+const webpush = require('web-push');
+
+webpush.setVapidDetails(
+    'mailto:youremail@example.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+);
 const pool = require('../config/db.js');
 
 exports.triggerAlert = async (req, res) => {
