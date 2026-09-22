@@ -1,35 +1,25 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Login from './pages/Login';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
+import Home from './pages/Home';
+import PatientAccess from './pages/PatientAccess';
+import DoctorAccess from './pages/DoctorAccess';
+import AdminAccess from './pages/AdminAccess';
 import Dashboard from './pages/Dashboard';
 
 function App() {
   return (
     <Router>
-      <div className="app-container">
-        <header className="topbar">
-          <div className="topbar-inner">
-            <div className="brand">
-              <div className="emblem">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                </svg>
-              </div>
-              <div>
-                <span className="brand-name">MedRelay</span>
-                <span className="brand-sub">Emergency Dispatch</span>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <main className="shell">
-          <Routes>
-            <Route path="/" element={<Navigate to="/login" />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-          </Routes>
-        </main>
-      </div>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/patient" element={<PatientAccess />} />
+          <Route path="/doctor" element={<DoctorAccess />} />
+          <Route path="/admin" element={<AdminAccess />} />
+          <Route path="/patient-dashboard" element={<Dashboard />} />
+          <Route path="/doctor-dashboard" element={<Dashboard />} />
+          <Route path="/admin-dashboard" element={<Dashboard />} />
+        </Route>
+      </Routes>
     </Router>
   );
 }
