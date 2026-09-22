@@ -13,14 +13,42 @@ export default function Dashboard() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [adminStats, setAdminStats] = useState({ totalDoctors: 0, availableDoctors: 0, busyOrOffDuty: 0, totalPatients: 0 });
+  const [doctorsList, setDoctorsList] = useState([]);
+  const [patientsList, setPatientsList] = useState([]);
+  const [doctorAlerts, setDoctorAlerts] = useState([]);
 
   useEffect(() => {
     if (!token) {
       navigate('/');
     } else if (role === 'ADMIN') {
       fetchAdminStats();
+    } else if (role === 'DOCTOR') {
+      fetchDoctorAlerts();
+      const interval = setInterval(fetchDoctorAlerts, 5000);
+      return () => clearInterval(interval);
     }
   }, [token, navigate, role]);
+
+  const fetchDoctorAlerts = async () => {
+    try {
+      const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/doctor/${localStorage.getItem('userId')}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDoctorAlerts(data.alerts);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const acknowledgeAlert = async (alertId) => {
+    try {
+      await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${alertId}/acknowledge`, { method: 'PATCH' });
+      fetchDoctorAlerts();
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const fetchAdminStats = async () => {
     try {
@@ -28,7 +56,18 @@ export default function Dashboard() {
       const data = await res.json();
       if (res.ok && data.success) {
         setAdminStats(data.stats);
+        setDoctorsList(data.doctors || []);
+        setPatientsList(data.patients || []);
       }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const deleteAdminRecord = async (type, id) => {
+    try {
+      await fetch(`https://emergency-backend-3ppk.onrender.com/api/admin/${type}/${id}`, { method: 'DELETE' });
+      fetchAdminStats();
     } catch (err) {
       console.error(err);
     }
@@ -60,6 +99,38 @@ export default function Dashboard() {
           <div className="metric busy"><span>Engaged or off duty</span><strong>{adminStats.busyOrOffDuty}</strong></div>
           <div className="metric"><span>Patient records</span><strong>{adminStats.totalPatients}</strong></div>
         </div>
+
+        <div style={{ marginTop: '2rem' }}>
+          <h3>Registered Doctors</h3>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '1rem', textAlign: 'left' }}>
+            <thead><tr style={{ borderBottom: '1px solid #ddd' }}><th>Name</th><th>Email</th><th>Specialization</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {doctorsList.length === 0 ? <tr><td colSpan="5">No doctors registered.</td></tr> : doctorsList.map(d => (
+                <tr key={d.id} style={{ borderBottom: '1px solid #eee' }}>
+                  <td style={{ padding: '8px 0' }}>{d.name}</td><td>{d.email}</td><td>{d.specialization}</td>
+                  <td>{d.isAvailable ? <span style={{color:'green'}}>Available</span> : <span style={{color:'red'}}>Off Duty</span>}</td>
+                  <td><button className="btn-sm plain" onClick={() => deleteAdminRecord('doctors', d.userId)}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: '2rem' }}>
+          <h3>Patient Records</h3>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '1rem', textAlign: 'left' }}>
+            <thead><tr style={{ borderBottom: '1px solid #ddd' }}><th>Name</th><th>Email</th><th>Age/Gender</th><th>Blood</th><th>Actions</th></tr></thead>
+            <tbody>
+              {patientsList.length === 0 ? <tr><td colSpan="5">No patients registered.</td></tr> : patientsList.map(p => (
+                <tr key={p.id} style={{ borderBottom: '1px solid #eee' }}>
+                  <td style={{ padding: '8px 0' }}>{p.name}</td><td>{p.email}</td><td>{p.age} / {p.gender}</td><td>{p.bloodGroup}</td>
+                  <td><button className="btn-sm plain" onClick={() => deleteAdminRecord('patients', p.userId)}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
       </section>
     );
   }
@@ -119,8 +190,28 @@ export default function Dashboard() {
         ) : (
           <>
             <div className="duty">Your location is being shared with the dispatch system.</div>
-            <div className="alerts-head"><h3>Assigned emergency requests</h3><span className="count-pill">0 active</span></div>
-            <div className="empty-note">No requests have been assigned to you at this time. This view refreshes automatically.</div>
+            <div className="alerts-head"><h3>Assigned emergency requests</h3><span className="count-pill">{doctorAlerts.length} active</span></div>
+            
+            {doctorAlerts.length === 0 ? (
+              <div className="empty-note">No requests have been assigned to you at this time. This view refreshes automatically.</div>
+            ) : (
+              <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2rem'}}>
+                {doctorAlerts.map(alert => (
+                  <div key={alert.alertid} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '15px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <strong>{alert.patientname} ({alert.age}y, {alert.gender}) - Blood: {alert.bloodgroup}</strong>
+                      <span className="count-pill" style={{backgroundColor: alert.status === 'PENDING' ? '#ffeb3b' : '#c8e6c9', color: '#000'}}>{alert.status}</span>
+                    </div>
+                    <p style={{ margin: '0 0 10px 0' }}><strong>Location:</strong> {alert.description}</p>
+                    <p style={{ margin: '0 0 15px 0' }}><strong>Contact:</strong> {alert.patientphone}</p>
+                    {alert.status === 'PENDING' && (
+                      <button className="btn teal" onClick={() => acknowledgeAlert(alert.alertid)}>Acknowledge En Route</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            
             <button className="btn navy" type="button" onClick={() => handleDutyToggle(false)}>Conclude on-duty session</button>
           </>
         )}
