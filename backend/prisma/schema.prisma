@@ -33,6 +33,8 @@ model User {
   doctorProfile  DoctorProfile?
   patientProfile PatientProfile?
   feedbacks      Feedback[]
+
+  @@index([role])
 }
 
 // 2. DoctorProfile Entity
@@ -48,6 +50,8 @@ model DoctorProfile {
   currentLng     Float?
 
   dispatches     DispatchRecord[]
+
+  @@index([isAvailable])
 }
 
 // 3. PatientProfile Entity
@@ -100,6 +104,8 @@ model EmergencyAlert {
   updatedAt      DateTime       @updatedAt
 
   dispatchRecord DispatchRecord?
+
+  @@index([status])
 }
 
 // 7. DispatchRecord Entity (Relationship Table)
