@@ -36,7 +36,7 @@ export default function Dashboard() {
     if (role === 'PATIENT' && activeAlertId) {
       const fetchStatus = async () => {
         try {
-          const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/status/${activeAlertId}`);
+          const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${activeAlertId}/status`);
           const data = await res.json();
           if (res.ok && data.success) {
             setActiveAlertDetails(data.alert);
