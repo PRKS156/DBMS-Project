@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b3b3a">
+<meta name="description" content="MedRelay — a secure emergency medical dispatch service connecting patients with the nearest available clinician.">
+<title>MedRelay | Emergency Medical Dispatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="manifest" href="/manifest.json">
+<style>
+:root{
+  --ink:#0f2a31;--ink-2:#33555e;--ink-3:#6b8891;
+  --paper:#eef2f1;--surface:#ffffff;--surface-2:#f6f9f8;
+  --line:#dde6e4;--line-2:#c6d6d2;
+  --teal:#0c605c;--teal-dark:#08423f;--teal-pale:#e6f2ef;
+  --red:#b83a33;--red-dark:#8e2b26;--red-pale:#fbecea;
+  --navy:#12333d;--gold:#9a6d24;
+  --ok:#1c6a45;--ok-pale:#e8f5ed;--warn:#8a5512;--warn-pale:#fdf3e3;
+  --sh-1:0 1px 2px rgba(15,42,49,.06);
+  --sh-2:0 12px 30px rgba(15,42,49,.09),0 2px 6px rgba(15,42,49,.04);
+  --sh-3:0 28px 70px rgba(15,42,49,.14),0 3px 8px rgba(15,42,49,.05);
+  --r-xl:26px;--r-lg:18px;--r-md:12px;--r-sm:9px;
+  --ui:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+  --display:"Fraunces",Georgia,"Times New Roman",serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;background:var(--paper);scroll-behavior:smooth}
+body{
+  min-width:320px;min-height:100vh;margin:0;color:var(--ink);
+  font-family:var(--ui);font-size:15px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(1100px 520px at 6% -6%,rgba(12,96,92,.16),transparent 62%),
+    radial-gradient(900px 520px at 98% 104%,rgba(184,58,51,.10),transparent 60%),
+    var(--paper);
+}
+body::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.42;
+  background-image:linear-gradient(rgba(15,42,49,.032) 1px,transparent 1px),linear-gradient(90deg,rgba(15,42,49,.032) 1px,transparent 1px);
+  background-size:38px 38px;
+  -webkit-mask-image:linear-gradient(to bottom,#000,transparent 82%);
+  mask-image:linear-gradient(to bottom,#000,transparent 82%);
+}
+button,input,select{font:inherit;color:inherit}
+button{-webkit-tap-highlight-color:transparent}
+:focus-visible{outline:3px solid rgba(12,96,92,.32);outline-offset:3px;border-radius:6px}
+h1,h2,h3,h4,p{margin-top:0}
+.vh{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ---------- Top bar ---------- */
+.topbar{
+  position:sticky;top:0;z-index:40;
+  background:rgba(255,255,255,.82);backdrop-filter:blur(16px) saturate(1.4);
+  border-bottom:1px solid var(--line);
+}
+.topbar-inner{width:min(100%,1320px);margin:0 auto;padding:13px 24px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.brand{display:inline-flex;align-items:center;gap:12px}
+.emblem{
+  width:40px;height:40px;flex:0 0 auto;display:grid;place-items:center;color:#fff;border-radius:13px;
+  background:linear-gradient(150deg,#c9463d,#96302a);box-shadow:0 10px 22px rgba(184,58,51,.30);
+}
+.emblem svg{width:22px;height:22px}
+.brand-name{display:block;font-size:19px;font-weight:800;letter-spacing:-.045em;line-height:1}
+.brand-sub{display:block;margin-top:4px;color:var(--ink-3);font-size:9.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}
+.topbar-meta{display:flex;align-items:center;gap:14px}
+.chip{
+  display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:99px;
+  font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;white-space:nowrap;
+  color:var(--teal-dark);background:var(--teal-pale);border:1px solid #cfe4de;
+}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:#22996a;box-shadow:0 0 0 4px rgba(34,153,106,.15)}
+.chip.quiet{color:var(--ink-2);background:#fff;border-color:var(--line-2)}
+.emergency-note{
+  width:min(100%,1320px);margin:0 auto;padding:9px 24px;
+  display:flex;align-items:center;gap:9px;
+  color:var(--red-dark);font-size:11.5px;font-weight:600;
+}
+.emergency-strip{background:linear-gradient(90deg,#fdf1ef,#fff8f7);border-bottom:1px solid #f0d3cf}
+
+/* ---------- Shell ---------- */
+.shell{width:min(100%,1320px);margin:0 auto;padding:36px 24px 52px}
+.card{
+  width:min(100%,600px);margin:0 auto;padding:32px;
+  background:rgba(255,255,255,.95);border:1px solid rgba(198,214,210,.9);
+  border-radius:var(--r-xl);box-shadow:var(--sh-3);backdrop-filter:blur(14px);
+}
+.card.wide{width:100%;max-width:1280px;padding:30px}
+
+.screen{display:none}
+.screen.active{display:block;animation:in .36s cubic-bezier(.2,.7,.3,1) both}
+@keyframes in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+.heading{margin-bottom:26px}
+.eyebrow{display:inline-flex;align-items:center;gap:9px;margin-bottom:12px;color:var(--teal);font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+.eyebrow::before{content:"";width:20px;height:1px;background:currentColor}
+h1{margin-bottom:10px;font-family:var(--display);font-size:clamp(29px,5vw,40px);font-weight:600;letter-spacing:-.035em;line-height:1.06}
+h2{font-family:var(--display);font-weight:600;letter-spacing:-.03em}
+h3{margin:0;font-size:15px;font-weight:700;letter-spacing:-.015em}
+.sub{max-width:48ch;margin:0;color:var(--ink-2);font-size:13.5px;line-height:1.68}
+.sub strong{color:var(--ink);font-weight:700}
+
+/* ---------- Hero panel ---------- */
+.panel{
+  position:relative;overflow:hidden;padding:26px;margin:0 0 20px;
+  border:1px solid #d5e7e3;border-radius:var(--r-lg);
+  background:linear-gradient(135deg,#ecf6f3 0%,#fafdfc 58%,#eaf4f1 100%);
+}
+.panel::after{content:"+";position:absolute;right:-14px;bottom:-52px;color:rgba(12,96,92,.07);font-size:190px;font-weight:800;line-height:1}
+.panel>*{position:relative;z-index:1}
+.panel h2{margin:0 0 8px;font-size:22px}
+.panel p{max-width:42ch;margin:0;color:var(--ink-2);font-size:12.5px;line-height:1.7}
+.panel-stats{display:flex;flex-wrap:wrap;gap:22px;margin-top:20px;padding-top:18px;border-top:1px solid rgba(12,96,92,.14)}
+.panel-stat span{display:block;color:var(--ink-3);font-size:9.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.panel-stat strong{display:block;margin-top:5px;font-family:var(--display);font-size:19px;font-weight:600}
+
+/* ---------- Role cards ---------- */
+.roles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.role{
+  position:relative;min-height:184px;padding:22px 19px 20px;overflow:hidden;
+  text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+  cursor:pointer;box-shadow:var(--sh-1);
+  transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease,background .2s ease;
+}
+.role::after{content:"→";position:absolute;right:19px;bottom:16px;color:var(--ink-3);font-size:17px;transition:transform .2s ease,color .2s ease}
+.role:hover{transform:translateY(-4px);border-color:#8fb8b0;background:#fbfefd;box-shadow:var(--sh-2)}
+.role:hover::after{transform:translateX(5px);color:var(--teal)}
+.role.alt:hover{border-color:#dd9b95;background:#fffbfa}
+.role.alt:hover::after{color:var(--red)}
+.role-icon{display:grid;place-items:center;width:44px;height:44px;margin-bottom:22px;color:var(--teal);background:var(--teal-pale);border-radius:13px}
+.role.alt .role-icon{color:var(--red);background:var(--red-pale)}
+.role-icon svg{width:22px;height:22px}
+.role-title{display:block;font-size:14.5px;font-weight:800;letter-spacing:-.02em}
+.role-note{display:block;margin-top:6px;color:var(--ink-2);font-size:11.5px;font-weight:500;line-height:1.6}
+.roles.compact .role{min-height:156px}
+
+/* ---------- Links / footer ---------- */
+.screen-footer{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:44px;margin-top:28px;padding-top:18px;border-top:1px solid var(--line)}
+.link{display:inline-flex;align-items:center;gap:8px;color:var(--ink-2);font-size:11.5px;font-weight:700;text-decoration:none;cursor:pointer;transition:color .16s ease}
+.link:hover{color:var(--teal)}
+.link.back::before{content:"←";font-size:15px}
+.link.admin::before{content:"⌘";font-size:14px}
+.site-footer{width:min(100%,1320px);margin:0 auto;padding:26px 24px 40px;color:var(--ink-3);font-size:11px;line-height:1.7;text-align:center}
+.site-footer strong{color:var(--ink-2)}
+
+/* ---------- Forms ---------- */
+.form{display:grid;gap:17px}
+.field{text-align:left}
+label{display:flex;justify-content:space-between;gap:10px;margin:0 0 8px;font-size:11.5px;font-weight:800;letter-spacing:.01em}
+.hint{color:var(--ink-3);font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none}
+input,select{
+  width:100%;height:50px;padding:0 14px;font-size:13.5px;font-weight:600;
+  background:#fff;border:1px solid var(--line-2);border-radius:var(--r-sm);
+  transition:border-color .16s ease,box-shadow .16s ease,background .16s ease;
+}
+input::placeholder{color:#9db0ad;font-weight:500}
+input:hover,select:hover{border-color:#a9c1bc}
+input:focus,select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 4px rgba(12,96,92,.12);background:#fdffff}
+input[aria-invalid="true"]{border-color:var(--red);box-shadow:0 0 0 4px rgba(184,58,51,.10)}
+select{padding-right:40px;cursor:pointer;appearance:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2333555e' stroke-width='2.2' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat:no-repeat;background-position:right 13px center;background-size:17px}
+.split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.caption{margin:-3px 0 2px;color:var(--ink-2);font-size:11.5px;line-height:1.6}
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:66px}
+.pw-toggle{position:absolute;right:6px;top:6px;height:38px;padding:0 12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);border-radius:7px;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+.pw-toggle:hover{color:var(--teal);border-color:var(--line-2)}
+
+/* ---------- Buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  width:100%;min-height:54px;margin-top:24px;padding:13px 20px;
+  color:#fff;border:0;border-radius:var(--r-md);
+  font-size:13.5px;font-weight:800;letter-spacing:.01em;cursor:pointer;
+  transition:transform .16s ease,box-shadow .16s ease,filter .16s ease;
+}
+.btn:hover:not(:disabled){transform:translateY(-2px);filter:saturate(1.06)}
+.btn:active:not(:disabled){transform:none}
+.btn:disabled{cursor:not-allowed;opacity:.62;box-shadow:none;transform:none}
+.btn.teal{background:linear-gradient(135deg,#10736c,#0a534f);box-shadow:0 14px 26px rgba(12,96,92,.24)}
+.btn.red{background:linear-gradient(135deg,#c74a42,#a1332d);box-shadow:0 14px 26px rgba(184,58,51,.24)}
+.btn.navy{background:linear-gradient(135deg,#23454f,#12333d);box-shadow:0 14px 26px rgba(18,51,61,.22)}
+.spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- Result cards ---------- */
+.result{display:none;margin-top:18px;padding:15px 16px;border:1px solid;border-radius:var(--r-md);font-size:12.5px;font-weight:600;line-height:1.75}
+.result b{display:block;margin-bottom:4px;font-size:13.5px;font-weight:800}
+.result.success{color:var(--ok);background:var(--ok-pale);border-color:#bfe0cd}
+.result.error{color:var(--red-dark);background:var(--red-pale);border-color:#eebbb6}
+.result.info{color:var(--warn);background:var(--warn-pale);border-color:#efd6a8}
+
+/* ---------- ID card / readiness ---------- */
+.idcard{margin-top:6px;padding:30px 20px;text-align:center;background:linear-gradient(135deg,#ecf7f3,#fbfffe);border:1px solid #bedcd4;border-radius:var(--r-lg)}
+.idcard .lbl{color:var(--teal);font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+.idcard .val{margin:12px 0 10px;font-family:var(--display);font-size:46px;font-weight:600;letter-spacing:.03em;line-height:1}
+.idcard p{max-width:40ch;margin:0 auto;color:var(--ink-2);font-size:11.5px;line-height:1.65}
+.checklist{padding:22px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-lg)}
+.checklist ul{padding:0;margin:14px 0 0;list-style:none}
+.checklist li{display:flex;gap:11px;padding:10px 0;color:var(--ink-2);font-size:12.5px;line-height:1.55;border-bottom:1px solid var(--line)}
+.checklist li:last-child{padding-bottom:0;border:0}
+.checklist li::before{content:"✓";color:var(--teal);font-weight:800}
+
+/* ---------- Duty / alerts ---------- */
+.duty{display:flex;align-items:center;gap:11px;padding:14px 16px;margin:0 0 18px;color:var(--ok);background:var(--ok-pale);border:1px solid #bfe0cd;border-radius:var(--r-md);font-size:12px;font-weight:700;line-height:1.5}
+.duty::before{content:"";width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:#22996a;box-shadow:0 0 0 4px rgba(34,153,106,.16);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 9px rgba(34,153,106,0)}}
+.alerts-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:22px 0 12px}
+.alerts-head h3{font-size:13px;letter-spacing:.02em}
+.count-pill{padding:4px 10px;border-radius:99px;background:var(--red-pale);color:var(--red-dark);font-size:10.5px;font-weight:800}
+#alertBanner{display:none}
+.alert{padding:16px;margin-bottom:12px;background:linear-gradient(180deg,#fffaf9,#fff);border:1px solid #eec5c0;border-left:4px solid var(--red);border-radius:var(--r-md);box-shadow:var(--sh-1)}
+.alert:last-child{margin-bottom:0}
+.alert-title{display:flex;align-items:center;gap:8px;color:var(--red-dark);font-size:13px;font-weight:800;letter-spacing:-.01em}
+.alert-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px;margin:12px 0 0}
+.alert-grid div{font-size:11.5px;line-height:1.5}
+.alert-grid span{display:block;color:var(--ink-3);font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.alert-grid b{color:var(--ink);font-weight:700}
+.ack{min-height:38px;margin-top:14px;padding:8px 16px;color:#fff;background:var(--red);border:0;border-radius:8px;font-size:11.5px;font-weight:800;cursor:pointer;transition:background .16s ease}
+.ack:hover{background:var(--red-dark)}
+.empty-note{padding:20px;color:var(--ink-3);text-align:center;background:var(--surface-2);border:1px dashed var(--line-2);border-radius:var(--r-md);font-size:12px}
+
+/* ---------- Dashboard ---------- */
+.dash-top{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;padding-bottom:24px;border-bottom:1px solid var(--line)}
+.dash-actions{display:flex;flex:0 0 auto;align-items:center;gap:10px}
+.btn-sm{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:9px 15px;border-radius:9px;font-size:11.5px;font-weight:800;cursor:pointer;transition:background .16s ease,border-color .16s ease,color .16s ease}
+.btn-sm.ghost{color:var(--teal-dark);background:#fff;border:1px solid var(--line-2)}
+.btn-sm.ghost:hover{border-color:var(--teal);background:var(--teal-pale)}
+.btn-sm.plain{color:var(--ink-2);background:transparent;border:1px solid transparent}
+.btn-sm.plain:hover{color:var(--red-dark);background:#fff8f7;border-color:#eec5c0}
+.dash-note{min-height:18px;margin:14px 0 0;color:var(--ink-3);font-size:11.5px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:22px 0}
+.metric{padding:17px 18px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md)}
+.metric span{display:block;color:var(--ink-3);font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.metric strong{display:block;margin-top:9px;font-family:var(--display);font-size:30px;font-weight:600;line-height:1}
+.metric.ok strong{color:var(--ok)}
+.metric.busy strong{color:var(--red)}
+.section{margin-top:22px;background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-1)}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 18px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.section-head p{margin:4px 0 0;color:var(--ink-3);font-size:10.5px}
+.record-count{padding:5px 11px;color:var(--teal-dark);background:var(--teal-pale);border-radius:99px;font-size:10.5px;font-weight:800;white-space:nowrap}
+.table-wrap{overflow-x:auto}
+table{width:100%;min-width:820px;border-collapse:collapse;text-align:left}
+th,td{padding:14px 16px;border-bottom:1px solid #eaf0ee;font-size:12px}
+th{color:var(--ink-3);background:#fff;font-size:9.5px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;white-space:nowrap;position:sticky;top:0}
+td{color:#2a4a53;font-weight:600}
+td.mono{font-variant-numeric:tabular-nums}
+tbody tr:last-child td{border-bottom:0}
+tbody tr{transition:background .14s ease}
+tbody tr:hover{background:#f7fbfa}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:99px;font-size:10.5px;font-weight:800;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%}
+.pill.available{color:var(--ok);background:var(--ok-pale)}
+.pill.available::before{background:#22996a}
+.pill.busy{color:var(--red-dark);background:var(--red-pale)}
+.pill.busy::before{background:var(--red)}
+.pill.off-duty,.pill.unknown{color:#64797d;background:#eef1f0}
+.pill.off-duty::before,.pill.unknown::before{background:#94a8a5}
+.icon-btn{display:grid;place-items:center;width:32px;height:32px;color:var(--red-dark);background:#fff;border:1px solid #ecc3bf;border-radius:8px;cursor:pointer;transition:background .16s ease,border-color .16s ease}
+.icon-btn:hover{background:var(--red-pale);border-color:#e29b95}
+.empty-row td{padding:30px;color:var(--ink-3);text-align:center;font-weight:500}
+
+@media (max-width:900px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:720px){
+  .topbar-inner{padding:11px 16px}
+  .emergency-note{padding:8px 16px;font-size:11px}
+  .shell{padding:18px 14px 30px}
+  .card,.card.wide{padding:21px;border-radius:20px}
+  .brand-sub{display:none}
+  .dash-top{flex-direction:column;align-items:flex-start}
+  .dash-actions{width:100%;justify-content:space-between}
+  .alert-grid{grid-template-columns:1fr}
+}
+@media (max-width:430px){
+  .roles{grid-template-columns:1fr}
+  .role,.roles.compact .role{min-height:0}
+  .role-icon{margin-bottom:14px}
+  .split{grid-template-columns:1fr}
+  h1{font-size:28px}
+  .idcard .val{font-size:38px}
+  .chip{font-size:0;padding:8px}
+  .chip .dot{margin:0}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="emblem" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round"><path d="M12 4v16M4 12h16"/><path d="M5 5l14 14M19 5L5 19" opacity=".32"/></svg>
+      </span>
+      <span>
+        <span class="brand-name">MedRelay</span>
+        <span class="brand-sub">Emergency Medical Dispatch</span>
+      </span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip quiet">Encrypted transmission</span>
+      <span class="chip"><span class="dot"></span>Dispatch network operational</span>
+    </div>
+  </div>
+</header>
+<div class="emergency-strip">
+  <p class="emergency-note">
+    <strong>Important:</strong>&nbsp;In the event of a life-threatening emergency, contact your national emergency number immediately. MedRelay supplements, and does not replace, emergency services.
+  </p>
+</div>
+
+<main class="shell">
+  <section class="card" id="mainContainer" aria-label="MedRelay emergency dispatch service">
+
+    <!-- Role selection -->
+    <section id="screen-role" class="screen active">
+      <div class="heading">
+        <span class="eyebrow">Coordinated clinical response</span>
+        <h1>Emergency care,<br>professionally dispatched.</h1>
+        <p class="sub">MedRelay connects patients and caregivers with the nearest available clinician, matched by specialisation and proximity, at the moment care is required.</p>
+      </div>
+      <div class="panel">
+        <h2>How may we assist you today?</h2>
+        <p>Please select the access path that applies to you. Patient requests are routed to an available physician in real time and monitored until acknowledged.</p>
+        <div class="panel-stats">
+          <div class="panel-stat"><span>Median dispatch</span><strong>Under 60s</strong></div>
+          <div class="panel-stat"><span>Location refresh</span><strong>Every 10s</strong></div>
+          <div class="panel-stat"><span>Availability</span><strong>24 / 7</strong></div>
+        </div>
+      </div>
+      <div class="roles">
+        <button class="role" type="button" onclick="showScreen('doctor-choice')">
+          <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v5a4 4 0 0 0 8 0V3"/><path d="M6 21v-4a6 6 0 0 1 12 0v4"/><path d="M12 12v9"/></svg></span>
+          <span class="role-title">Medical professional</span>
+          <span class="role-note">Manage your duty status and receive dispatch notifications.</span>
+        </button>
+        <button class="role alt" type="button" onclick="showScreen('patient-choice')">
+          <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 4h7l1.2 3H20a1 1 0 0 1 1 1v9.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5V8a1 1 0 0 1 1-1h3.3L8.5 4Z"/><path d="M12 9v6M9 12h6"/><path d="M6.5 20v-2M17.5 20v-2"/></svg></span>
+          <span class="role-title">Patient or caregiver</span>
+          <span class="role-note">Submit an urgent request to the nearest available care team.</span>
+        </button>
+      </div>
+      <div class="screen-footer">
+        <span class="link" style="cursor:default">Access is logged for clinical governance.</span>
+        <a class="link admin" role="button" tabindex="0" onclick="showScreen('admin-login')" onkeydown="if(event.key==='Enter'||event.key===' ')showScreen('admin-login')">Administrative portal</a>
+      </div>
+    </section>
+
+    <!-- Patient choice -->
+    <section id="screen-patient-choice" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Patient access</span>
+        <h1>Request medical assistance.</h1>
+        <p class="sub">Sign in with your existing patient record, or complete a one-time registration to begin.</p>
+      </div>
+      <div class="roles compact">
+        <button class="role" type="button" onclick="showScreen('patient-login')">
+          <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
+          <span class="role-title">Sign in</span>
+          <span class="role-note">I already hold a patient identification number.</span>
+        </button>
+        <button class="role alt" type="button" onclick="showScreen('patient')">
+          <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M12 8v8M8 12h8"/></svg></span>
+          <span class="role-title">Register</span>
+          <span class="role-note">Create a new patient care record.</span>
+        </button>
+      </div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="showScreen('role')" onkeydown="if(event.key==='Enter'||event.key===' ')showScreen('role')">Return to access options</a></div>
+    </section>
+
+    <!-- Patient login -->
+    <section id="screen-patient-login" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Patient sign in</span>
+        <h1>Welcome back.</h1>
+        <p class="sub">Please enter the credentials issued to you at registration.</p>
+      </div>
+      <div class="form">
+        <div class="field"><label for="loginPatientId">Patient identification number</label><input type="number" id="loginPatientId" inputmode="numeric" placeholder="For example, 11" autocomplete="username"></div>
+        <div class="field"><label for="loginPatientPassword">Password</label>
+          <div class="pw-wrap"><input type="password" id="loginPatientPassword" placeholder="Enter your password" autocomplete="current-password"><button class="pw-toggle" type="button" onclick="togglePw('loginPatientPassword',this)">Show</button></div>
+        </div>
+      </div>
+      <button class="btn red" id="patLoginBtn" type="button" onclick="loginPatient()">Sign in securely <span aria-hidden="true">→</span></button>
+      <div class="result" id="patLoginResult" role="status" aria-live="polite"></div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="showScreen('patient-choice')" onkeydown="if(event.key==='Enter'||event.key===' ')showScreen('patient-choice')">Return to patient access</a></div>
+    </section>
+
+    <!-- Patient registration confirmation -->
+    <section id="screen-patient-saved-id" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Registration complete</span>
+        <h1>Your patient record is active.</h1>
+        <p class="sub">Please retain the identification number below. It is required each time you sign in.</p>
+      </div>
+      <div class="idcard"><div class="lbl">Patient identification number</div><div class="val" id="savedPatientIdDisplay">—</div><p>For your protection, password recovery is not available through this service. Please store your credentials securely.</p></div>
+      <button class="btn red" type="button" onclick="continueAfterPatientRegister()">Proceed to emergency request <span aria-hidden="true">→</span></button>
+    </section>
+
+    <!-- Doctor choice -->
+    <section id="screen-doctor-choice" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Clinical access</span>
+        <h1>Join the response network.</h1>
+        <p class="sub">Sign in to update your duty status, or create a professional profile to begin receiving dispatches.</p>
+      </div>
+      <div class="roles compact">
+        <button class="role" type="button" onclick="showScreen('doctor-login')">
+          <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
+          <span class="role-title">Sign in</span>
+          <span class="role-note">I already hold a clinician identification number.</span>
+        </button>
+        <button class="role" type="button" onclick="showScreen('doctor')">
+          <span class="role-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M12 8v8M8 12h8"/></svg></span>
+          <span class="role-title">Register</span>
+          <span class="role-note">Create a new professional profile.</span>
+        </button>
+      </div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="showScreen('role')" onkeydown="if(event.key==='Enter'||event.key===' ')showScreen('role')">Return to access options</a></div>
+    </section>
+
+    <!-- Doctor login -->
+    <section id="screen-doctor-login" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Clinical sign in</span>
+        <h1>Welcome back, Doctor.</h1>
+        <p class="sub">Sign in to your profile. You will remain invisible to dispatch until you explicitly commence duty.</p>
+      </div>
+      <div class="form">
+        <div class="field"><label for="loginDoctorId">Clinician identification number</label><input type="number" id="loginDoctorId" inputmode="numeric" placeholder="For example, 4" autocomplete="username"></div>
+        <div class="field"><label for="loginDoctorPassword">Password</label>
+          <div class="pw-wrap"><input type="password" id="loginDoctorPassword" placeholder="Enter your password" autocomplete="current-password"><button class="pw-toggle" type="button" onclick="togglePw('loginDoctorPassword',this)">Show</button></div>
+        </div>
+      </div>
+      <button class="btn teal" id="docLoginBtn" type="button" onclick="loginDoctor()">Sign in securely <span aria-hidden="true">→</span></button>
+      <div class="result" id="docLoginResult" role="status" aria-live="polite"></div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="showScreen('doctor-choice')" onkeydown="if(event.key==='Enter'||event.key===' ')showScreen('doctor-choice')">Return to clinical access</a></div>
+    </section>
+
+    <!-- Doctor confirmation -->
+    <section id="screen-doctor-saved-id" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Profile established</span>
+        <h1>Your registration is complete.</h1>
+        <p class="sub">Please retain your clinician identification number for all future sign-ins.</p>
+      </div>
+      <div class="idcard"><div class="lbl">Clinician identification number</div><div class="val" id="savedDoctorIdDisplay">—</div><p>For your protection, password recovery is not available through this service. Please store your credentials securely.</p></div>
+      <button class="btn teal" type="button" onclick="continueAfterDoctorRegister()">Proceed to duty settings <span aria-hidden="true">→</span></button>
+    </section>
+
+    <!-- Doctor registration -->
+    <section id="screen-doctor" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Professional registration</span>
+        <h1>Establish your response profile.</h1>
+        <p class="sub">Your location is used solely to match nearby emergency requests, and only while you have elected to be on duty.</p>
+      </div>
+      <div class="form">
+        <div class="field"><label for="docName">Full name</label><input type="text" id="docName" placeholder="Dr. Jane Smith" autocomplete="name" oninput="this.value=this.value.replace(/[^A-Za-z. ]/g,'')"></div>
+        <div class="field"><label for="docPhone">Contact number <span class="hint">10 digits</span></label><input type="tel" id="docPhone" inputmode="numeric" placeholder="9876543210" maxlength="10" autocomplete="tel" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+        <div class="field"><label for="docSpecialization">Clinical specialisation</label><select id="docSpecialization"><option>General Medicine</option><option>Cardiology</option><option>Trauma Surgery</option><option>Pediatrics</option><option>Orthopedics</option><option>Critical Care</option><option>Neurology</option></select></div>
+        <div class="field"><label for="docPassword">Create password <span class="hint">Minimum 4 characters</span></label>
+          <div class="pw-wrap"><input type="password" id="docPassword" placeholder="Choose a secure password" autocomplete="new-password"><button class="pw-toggle" type="button" onclick="togglePw('docPassword',this)">Show</button></div>
+        </div>
+      </div>
+      <button class="btn teal" id="docSubmitBtn" type="button" onclick="registerDoctor()">Create professional profile <span aria-hidden="true">→</span></button>
+      <div class="result" id="docResult" role="status" aria-live="polite"></div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="showScreen('doctor-choice')" onkeydown="if(event.key==='Enter'||event.key===' ')showScreen('doctor-choice')">Return to clinical access</a></div>
+    </section>
+
+    <!-- Doctor ready -->
+    <section id="screen-doctor-ready" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Duty settings</span>
+        <h1>Welcome, Dr. <span id="readyDoctorName">—</span>.</h1>
+        <p class="sub">You are signed in but are <strong>not currently receiving</strong> emergency dispatches.</p>
+      </div>
+      <div class="checklist">
+        <h3>Before commencing duty</h3>
+        <ul>
+          <li>Grant location access so that proximity-based dispatch can operate accurately.</li>
+          <li>Enable notifications to receive urgent alerts while this tab is closed.</li>
+          <li>Remain available until you formally conclude your on-duty session.</li>
+        </ul>
+      </div>
+      <button class="btn teal" id="goLiveBtn" type="button" onclick="goLive()"><span aria-hidden="true">●</span> Commence on-duty session</button>
+      <div class="result" id="goLiveResult" role="status" aria-live="polite"></div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="logoutDoctor()" onkeydown="if(event.key==='Enter'||event.key===' ')logoutDoctor()">Sign out</a></div>
+    </section>
+
+    <!-- Doctor on duty -->
+    <section id="screen-doctor-onduty" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Live for dispatch</span>
+        <h1>You are currently on duty.</h1>
+        <p class="sub">Your availability and location are being securely transmitted to the dispatch service.</p>
+      </div>
+      <div class="duty" id="onDutyStatus">Your location is being shared with the dispatch system.</div>
+      <div class="alerts-head"><h3>Assigned emergency requests</h3><span class="count-pill" id="alertCount">0 active</span></div>
+      <div id="alertBanner" aria-live="polite"></div>
+      <div class="empty-note" id="alertEmpty">No requests have been assigned to you at this time. This view refreshes automatically.</div>
+      <button class="btn navy" type="button" onclick="goOffDuty()">Conclude on-duty session</button>
+    </section>
+
+    <!-- Patient registration -->
+    <section id="screen-patient" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Patient registration</span>
+        <h1>Create your care record.</h1>
+        <p class="sub">Register once so that emergency assistance can be requested whenever it is required.</p>
+      </div>
+      <div class="form">
+        <div class="field"><label for="patName">Full name</label><input type="text" id="patName" placeholder="John Doe" autocomplete="name" oninput="this.value=this.value.replace(/[^A-Za-z. ]/g,'')"></div>
+        <div class="split">
+          <div class="field"><label for="patAge">Age</label><input type="number" id="patAge" inputmode="numeric" placeholder="34" min="1" max="120" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+          <div class="field"><label for="patGender">Gender</label><select id="patGender"><option>Male</option><option>Female</option><option>Other</option></select></div>
+        </div>
+        <div class="field"><label for="patBloodGroup">Blood group</label><select id="patBloodGroup"><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>O+</option><option>O-</option><option>AB+</option><option>AB-</option></select></div>
+        <div class="field"><label for="patPhone">Contact number <span class="hint">10 digits</span></label><input type="tel" id="patPhone" inputmode="numeric" placeholder="9876543210" maxlength="10" autocomplete="tel" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+        <div class="field"><label for="patPassword">Create password <span class="hint">Minimum 4 characters</span></label>
+          <div class="pw-wrap"><input type="password" id="patPassword" placeholder="Choose a secure password" autocomplete="new-password"><button class="pw-toggle" type="button" onclick="togglePw('patPassword',this)">Show</button></div>
+        </div>
+      </div>
+      <button class="btn red" id="patSubmitBtn" type="button" onclick="registerPatient()">Create patient record <span aria-hidden="true">→</span></button>
+      <div class="result" id="patResult" role="status" aria-live="polite"></div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="showScreen('patient-choice')" onkeydown="if(event.key==='Enter'||event.key===' ')showScreen('patient-choice')">Return to patient access</a></div>
+    </section>
+
+    <!-- Patient emergency request -->
+    <section id="screen-patient-help" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Emergency request</span>
+        <h1>Assistance is one request away.</h1>
+        <p class="sub">Welcome back, <strong id="loggedInPatientName">Patient</strong>. Please confirm the nature of the emergency and your on-site location.</p>
+      </div>
+      <div class="form">
+        <div class="field"><label for="helpEmergencyType">Nature of the emergency</label>
+          <select id="helpEmergencyType">
+            <optgroup label="Common presentations">
+              <option value="Cardiology">Cardiac emergency — chest pain or suspected infarction</option>
+              <option value="Trauma Surgery">Severe injury or accident</option>
+              <option value="Pediatrics">Paediatric emergency</option>
+              <option value="Orthopedics">Bone or joint injury</option>
+              <option value="General Medicine">General illness or febrile episode</option>
+            </optgroup>
+            <optgroup label="Inpatient and rapid response">
+              <option value="Critical Care" data-detail="Respiratory distress">Respiratory distress</option>
+              <option value="Critical Care" data-detail="Haemodynamic instability">Haemodynamic instability or shock</option>
+              <option value="Neurology">Altered mental status or neurological change</option>
+              <option value="Critical Care" data-detail="Sepsis">Sepsis or severe infection</option>
+              <option value="Trauma Surgery" data-detail="Post-procedural complication">Post-procedural or surgical complication</option>
+              <option value="Critical Care" data-detail="Rapid response activation">Rapid response or code activation</option>
+            </optgroup>
+            <option value="Unsure / General">Uncertain — please assess</option>
+          </select>
+        </div>
+        <p class="caption">Where known, please provide your on-site location so that the attending clinician can reach you without delay.</p>
+        <div class="split">
+          <div class="field"><label for="helpFloor">Floor</label><input type="text" id="helpFloor" placeholder="Third floor"></div>
+          <div class="field"><label for="helpRoom">Room</label><input type="text" id="helpRoom" placeholder="Room 312"></div>
+        </div>
+        <div class="field"><label for="helpBed">Bed number</label><input type="text" id="helpBed" placeholder="Bed 2"></div>
+      </div>
+      <button class="btn red" id="helpBtn" type="button" onclick="requestHelp()">Submit emergency request <span aria-hidden="true">→</span></button>
+      <div class="result" id="helpResult" role="status" aria-live="assertive"></div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="logoutPatient()" onkeydown="if(event.key==='Enter'||event.key===' ')logoutPatient()">Sign out</a></div>
+    </section>
+
+    <!-- Admin login -->
+    <section id="screen-admin-login" class="screen">
+      <div class="heading">
+        <span class="eyebrow">Administrative portal</span>
+        <h1>System oversight.</h1>
+        <p class="sub">Administrative credentials are required to view the live dispatch directory.</p>
+      </div>
+      <div class="form">
+        <div class="field"><label for="adminPassword">Administrative password</label>
+          <div class="pw-wrap"><input type="password" id="adminPassword" placeholder="Enter password" autocomplete="current-password"><button class="pw-toggle" type="button" onclick="togglePw('adminPassword',this)">Show</button></div>
+        </div>
+      </div>
+      <button class="btn navy" id="adminLoginBtn" type="button" onclick="loginAdmin()">Open dashboard <span aria-hidden="true">→</span></button>
+      <div class="result" id="adminLoginResult" role="status" aria-live="polite"></div>
+      <div class="screen-footer"><a class="link back" role="button" tabindex="0" onclick="showScreen('role')" onkeydown="if(event.key==='Enter'||event.key===' ')showScreen('role')">Return to access options</a></div>
+    </section>
+  </section>
+
+  <!-- Admin dashboard -->
+  <section class="card wide screen" id="screen-admin-dashboard">
+    <div class="dash-top">
+      <div>
+        <span class="eyebrow">Administrative portal</span>
+        <h1>Dispatch directory</h1>
+        <p class="sub">A current view of registered clinicians and patient records held by the service.</p>
+      </div>
+      <div class="dash-actions">
+        <button class="btn-sm ghost" type="button" onclick="loadAdminData()">Refresh directory</button>
+        <button class="btn-sm plain" type="button" onclick="logoutAdmin()">Sign out</button>
+      </div>
+    </div>
+    <p class="dash-note" id="adminStatus" aria-live="polite">The directory loads upon secure sign-in.</p>
+
+    <div class="metrics">
+      <div class="metric"><span>Registered clinicians</span><strong id="mDoctors">0</strong></div>
+      <div class="metric ok"><span>Currently available</span><strong id="mAvailable">0</strong></div>
+      <div class="metric busy"><span>Engaged or off duty</span><strong id="mBusy">0</strong></div>
+      <div class="metric"><span>Patient records</span><strong id="mPatients">0</strong></div>
+    </div>
+
+    <section class="section" aria-labelledby="doctorsHeading">
+      <div class="section-head"><div><h3 id="doctorsHeading">Medical professionals</h3><p>Current duty status and most recently reported location.</p></div><span class="record-count" id="doctorsRecordCount">0 records</span></div>
+      <div class="table-wrap"><table id="doctorsTable"><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Specialisation</th><th>Status</th><th>Coordinates</th><th><span class="vh">Actions</span></th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section class="section" aria-labelledby="patientsHeading">
+      <div class="section-head"><div><h3 id="patientsHeading">Patient records</h3><p>Registered patient contact details and care information.</p></div><span class="record-count" id="patientsRecordCount">0 records</span></div>
+      <div class="table-wrap"><table id="patientsTable"><thead><tr><th>ID</th><th>Name</th><th>Age</th><th>Gender</th><th>Blood group</th><th>Contact</th><th>Coordinates</th><th>Registered</th><th><span class="vh">Actions</span></th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <p><strong>MedRelay Emergency Medical Dispatch.</strong> Location data is collected only while a session is active and is used exclusively for clinical dispatch. Records are retained in accordance with applicable data-protection obligations.</p>
+</footer>
+
+<script>
+/* ⚠️ Replace with your own live backend URL */
+const API_BASE = 'https://emergency-backend-3ppk.onrender.com';
+
+let adminPasswordCache = '';
+let currentDoctorId = null;
+let watchId = null;
+let updateIntervalId = null;
+let latestCoords = null;
+let alertPollIntervalId = null;
+let patientAlertPollId = null;
+let loggedInPatient = null;
+const VAPID_PUBLIC_KEY = "BJSRRA8DirNAT_VyzwSZyowYxrW3lkV7DYSQKQGcFVEpcF-nAfsoZMjnIbj09gKgSRsIyBH_qLJzNbGp_nfvTzs";
+
+/* ---------- Helpers ---------- */
+function esc(v){
+  return String(v == null ? '' : v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function showScreen(name){
+  document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; s.setAttribute('aria-hidden','true'); });
+  const target = document.getElementById('screen-' + name);
+  target.classList.add('active');
+  target.style.display = 'block';
+  target.setAttribute('aria-hidden','false');
+  document.getElementById('mainContainer').style.display = (name === 'admin-dashboard') ? 'none' : 'block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function togglePw(id, btn){
+  const el = document.getElementById(id);
+  const show = el.type === 'password';
+  el.type = show ? 'text' : 'password';
+  btn.textContent = show ? 'Hide' : 'Show';
+}
+function showResult(elId, type, html){
+  const el = document.getElementById(elId);
+  el.className = 'result ' + type;
+  el.style.display = 'block';
+  el.innerHTML = html;
+}
+function setBusy(btn, busy, label){
+  if (!btn) return;
+  if (busy){
+    btn.dataset.label = btn.dataset.label || btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>' + esc(label || 'Please wait…');
+  } else {
+    btn.disabled = false;
+    if (btn.dataset.label) btn.innerHTML = btn.dataset.label;
+  }
+}
+function isValidPhone(p){ return /^[6-9]\d{9}$/.test(p); }
+function isValidName(n){ return /^[A-Za-z. ]{2,60}$/.test(n.trim()); }
+function mark(id, invalid){ const el = document.getElementById(id); if (el) el.setAttribute('aria-invalid', invalid ? 'true' : 'false'); }
+
+function getLocation(){
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation){ reject(new Error('Geolocation is not supported by this browser.')); return; }
+    let settled = false;
+    const manualTimeout = setTimeout(() => {
+      if (!settled){ settled = true; reject(new Error('The location request timed out. Please confirm that location services are enabled and try again.')); }
+    }, 15000);
+    navigator.geolocation.getCurrentPosition(
+      pos => { if (settled) return; settled = true; clearTimeout(manualTimeout); resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }); },
+      () => { if (settled) return; settled = true; clearTimeout(manualTimeout); reject(new Error('Location permission was denied or is unavailable.')); },
+      { timeout: 12000, enableHighAccuracy: true, maximumAge: 5000 }
+    );
+  });
+}
+
+/* Submit on Enter within any form area */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const active = document.querySelector('.screen.active');
+  if (!active || !active.contains(e.target) || e.target.tagName !== 'INPUT') return;
+  const btn = active.querySelector('.btn');
+  if (btn && !btn.disabled){ e.preventDefault(); btn.click(); }
+});
+
+/* ---------- Doctor ---------- */
+async function loginDoctor(){
+  const btn = document.getElementById('docLoginBtn');
+  const doctorId = document.getElementById('loginDoctorId').value.trim();
+  const password = document.getElementById('loginDoctorPassword').value;
+  if (!doctorId || !password){
+    showResult('docLoginResult','error','<b>Details required</b>Please enter your clinician identification number and password.');
+    return;
+  }
+  setBusy(btn, true, 'Verifying credentials…');
+  showResult('docLoginResult','info','Verifying your credentials…');
+  try{
+    const response = await fetch(`${API_BASE}/api/doctors/login`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ doctorId, password })
+    });
+    const result = await response.json();
+    if (response.ok && result.success){
+      currentDoctorId = result.doctor.doctorId;
+      localStorage.setItem('doctorId', currentDoctorId);
+      localStorage.setItem('doctorName', result.doctor.fullName);
+      document.getElementById('readyDoctorName').textContent = result.doctor.fullName;
+      showScreen('doctor-ready');
+    } else {
+      showResult('docLoginResult','error','<b>Sign-in unsuccessful</b>' + esc(result.message || 'Please verify your credentials and try again.'));
+    }
+  } catch(err){
+    showResult('docLoginResult','error','<b>Connection error</b>' + esc(err.message));
+  } finally { setBusy(btn, false); }
+}
+
+async function registerDoctor(){
+  const btn = document.getElementById('docSubmitBtn');
+  const fullName = document.getElementById('docName').value.trim();
+  const phoneNumber = document.getElementById('docPhone').value.trim();
+  const specialization = document.getElementById('docSpecialization').value;
+  const password = document.getElementById('docPassword').value;
+
+  mark('docName', !isValidName(fullName));
+  mark('docPhone', !isValidPhone(phoneNumber));
+  mark('docPassword', !password || password.length < 4);
+
+  if (!isValidName(fullName) || !isValidPhone(phoneNumber)){
+    showResult('docResult','error','<b>Details incomplete</b>Please provide a valid full name and a ten-digit contact number.');
+    return;
+  }
+  if (!password || password.length < 4){
+    showResult('docResult','error','<b>Password too short</b>Your password must contain at least four characters.');
+    return;
+  }
+
+  setBusy(btn, true, 'Determining your location…');
+  showResult('docResult','info','Determining your current location…');
+  try{
+    const { latitude, longitude } = await getLocation();
+    setBusy(btn, true, 'Creating your profile…');
+    showResult('docResult','info','Creating your professional profile…');
+    const response = await fetch(`${API_BASE}/api/doctors/register`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ fullName, phoneNumber, specialization, latitude, longitude, password })
+    });
+    const result = await response.json();
+    if (response.ok && result.success){
+      currentDoctorId = result.doctorId;
+      localStorage.setItem('doctorId', currentDoctorId);
+      localStorage.setItem('doctorName', fullName);
+      document.getElementById('savedDoctorIdDisplay').textContent = currentDoctorId;
+      showScreen('doctor-saved-id');
+    } else {
+      showResult('docResult','error','<b>Registration unsuccessful</b>' + esc(result.message || 'An unexpected error occurred.'));
+    }
+  } catch(err){
+    showResult('docResult','error','<b>Unable to continue</b>' + esc(err.message));
+  } finally { setBusy(btn, false); }
+}
+
+function continueAfterDoctorRegister(){
+  document.getElementById('readyDoctorName').textContent = localStorage.getItem('doctorName') || '';
+  showScreen('doctor-ready');
+}
+
+function startLocationTracking(){
+  watchId = navigator.geolocation.watchPosition(
+    pos => { latestCoords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude }; },
+    err => console.warn('Location watch error:', err.message),
+    { enableHighAccuracy: true }
+  );
+
+  updateIntervalId = setInterval(async () => {
+    if (!latestCoords || !currentDoctorId) return;
+    try{
+      await fetch(`${API_BASE}/api/doctors/${currentDoctorId}/location`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(latestCoords)
+      });
+      document.getElementById('onDutyStatus').textContent =
+        `Location last transmitted at ${new Date().toLocaleTimeString()}.`;
+    } catch(e){ /* silent retry */ }
+  }, 10000);
+
+  alertPollIntervalId = setInterval(checkForAlerts, 10000);
+  checkForAlerts();
+}
+
+async function checkForAlerts(){
+  if (!currentDoctorId) return;
+  try{
+    const response = await fetch(`${API_BASE}/api/alerts/doctor/${currentDoctorId}`);
+    const result = await response.json();
+    if (result.success) renderAlertBanner(result.alerts);
+  } catch(e){ /* silent retry */ }
+}
+
+function renderAlertBanner(alerts){
+  const banner = document.getElementById('alertBanner');
+  const empty = document.getElementById('alertEmpty');
+  const count = document.getElementById('alertCount');
+  const list = alerts || [];
+  count.textContent = list.length + (list.length === 1 ? ' active' : ' active');
+
+  if (list.length === 0){
+    banner.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  banner.style.display = 'block';
+  banner.innerHTML = list.map(a => `
+    <div class="alert">
+      <div class="alert-title">🚨 Patient requires assistance</div>
+      <div class="alert-grid">
+        <div><span>Patient</span><b>${esc(a.patientname || 'Not recorded')}</b></div>
+        <div><span>Age / Gender</span><b>${esc(a.age || '—')} / ${esc(a.gender || '—')}</b></div>
+        <div><span>Blood group</span><b>${esc(a.bloodgroup || '—')}</b></div>
+        <div><span>Contact</span><b>${esc(a.patientphone || '—')}</b></div>
+        <div><span>Location</span><b>Floor ${esc(a.floor || '—')}, Room ${esc(a.roomnumber || '—')}, Bed ${esc(a.bednumber || '—')}</b></div>
+      </div>
+      <button class="ack" type="button" onclick="acknowledgeAlert(${Number(a.alertid)})">Acknowledge and respond</button>
+    </div>
+  `).join('');
+}
+
+async function acknowledgeAlert(alertId){
+  await fetch(`${API_BASE}/api/alerts/${alertId}/acknowledge`, { method:'PATCH' });
+  checkForAlerts();
+}
+
+async function goLive(){
+  const btn = document.getElementById('goLiveBtn');
+  setBusy(btn, true, 'Determining your location…');
+  showResult('goLiveResult','info','Determining your current location…');
+  try{
+    const { latitude, longitude } = await getLocation();
+    await fetch(`${API_BASE}/api/doctors/${currentDoctorId}/location`, {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ latitude, longitude })
+    });
+    await fetch(`${API_BASE}/api/doctors/${currentDoctorId}/status`, {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ status: 'Available' })
+    });
+    startLocationTracking();
+    subscribeToPush(currentDoctorId);
+    showScreen('doctor-onduty');
+  } catch(err){
+    showResult('goLiveResult','error','<b>Unable to commence duty</b>' + esc(err.message));
+  } finally { setBusy(btn, false); }
+}
+
+async function goOffDuty(){
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  if (updateIntervalId !== null) clearInterval(updateIntervalId);
+  if (alertPollIntervalId !== null) clearInterval(alertPollIntervalId);
+
+  if (currentDoctorId){
+    try{
+      await fetch(`${API_BASE}/api/doctors/${currentDoctorId}/status`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ status:'Off-Duty' })
+      });
+    } catch(e){ /* ignore */ }
+  }
+
+  currentDoctorId = null; watchId = null; updateIntervalId = null; alertPollIntervalId = null; latestCoords = null;
+  showScreen('role');
+}
+
+function logoutDoctor(){
+  localStorage.removeItem('doctorId');
+  localStorage.removeItem('doctorName');
+  currentDoctorId = null;
+  showScreen('role');
+}
+
+/* ---------- Patient ---------- */
+async function registerPatient(){
+  const btn = document.getElementById('patSubmitBtn');
+  const fullName = document.getElementById('patName').value.trim();
+  const age = document.getElementById('patAge').value.trim();
+  const gender = document.getElementById('patGender').value;
+  const bloodGroup = document.getElementById('patBloodGroup').value;
+  const phoneNumber = document.getElementById('patPhone').value.trim();
+  const password = document.getElementById('patPassword').value;
+  const ageNum = parseInt(age, 10);
+
+  mark('patName', !isValidName(fullName));
+  mark('patPhone', !isValidPhone(phoneNumber));
+  mark('patAge', isNaN(ageNum) || ageNum < 1 || ageNum > 120);
+  mark('patPassword', !password || password.length < 4);
+
+  if (!isValidName(fullName) || !isValidPhone(phoneNumber) || isNaN(ageNum) || ageNum < 1 || ageNum > 120){
+    showResult('patResult','error','<b>Details incomplete</b>Please provide a valid full name, age, and ten-digit contact number.');
+    return;
+  }
+  if (!password || password.length < 4){
+    showResult('patResult','error','<b>Password too short</b>Your password must contain at least four characters.');
+    return;
+  }
+
+  setBusy(btn, true, 'Determining your location…');
+  showResult('patResult','info','Determining your current location…');
+  try{
+    const { latitude, longitude } = await getLocation();
+    setBusy(btn, true, 'Creating your record…');
+    showResult('patResult','info','Creating your patient record…');
+
+    const registerResponse = await fetch(`${API_BASE}/api/patients/register`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ fullName, age: ageNum, gender, bloodGroup, phoneNumber, latitude, longitude, password })
+    });
+    const registerResult = await registerResponse.json();
+
+    if (!registerResponse.ok || !registerResult.success){
+      showResult('patResult','error','<b>Registration unsuccessful</b>' + esc(registerResult.message || 'An unexpected error occurred.'));
+      return;
+    }
+
+    localStorage.setItem('patientId', registerResult.patientId);
+    localStorage.setItem('patientName', fullName);
+    document.getElementById('savedPatientIdDisplay').textContent = registerResult.patientId;
+    showScreen('patient-saved-id');
+  } catch(err){
+    showResult('patResult','error','<b>Unable to continue</b>' + esc(err.message));
+  } finally { setBusy(btn, false); }
+}
+
+async function loginPatient(){
+  const btn = document.getElementById('patLoginBtn');
+  const patientId = document.getElementById('loginPatientId').value.trim();
+  const password = document.getElementById('loginPatientPassword').value;
+  if (!patientId || !password){
+    showResult('patLoginResult','error','<b>Details required</b>Please enter your patient identification number and password.');
+    return;
+  }
+  setBusy(btn, true, 'Verifying credentials…');
+  showResult('patLoginResult','info','Verifying your credentials…');
+  try{
+    const response = await fetch(`${API_BASE}/api/patients/login`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ patientId, password })
+    });
+    const result = await response.json();
+    if (response.ok && result.success){
+      localStorage.setItem('patientId', result.patient.patientId);
+      localStorage.setItem('patientName', result.patient.fullName);
+      loggedInPatient = result.patient;
+      document.getElementById('loggedInPatientName').textContent = result.patient.fullName;
+      showScreen('patient-help');
+    } else {
+      showResult('patLoginResult','error','<b>Sign-in unsuccessful</b>' + esc(result.message || 'Please verify your credentials and try again.'));
+    }
+  } catch(err){
+    showResult('patLoginResult','error','<b>Connection error</b>' + esc(err.message));
+  } finally { setBusy(btn, false); }
+}
+
+function continueAfterPatientRegister(){
+  loggedInPatient = { patientId: localStorage.getItem('patientId'), fullName: localStorage.getItem('patientName') };
+  document.getElementById('loggedInPatientName').textContent = loggedInPatient.fullName || 'Patient';
+  showScreen('patient-help');
+}
+
+async function requestHelp(){
+  const btn = document.getElementById('helpBtn');
+  const patientId = localStorage.getItem('patientId');
+  const emergencyType = document.getElementById('helpEmergencyType').value;
+  const floor = document.getElementById('helpFloor').value.trim();
+  const roomNumber = document.getElementById('helpRoom').value.trim();
+  const bedNumber = document.getElementById('helpBed').value.trim();
+
+  setBusy(btn, true, 'Determining your location…');
+  showResult('helpResult','info','Determining your current location…');
+  try{
+    const { latitude, longitude } = await getLocation();
+    setBusy(btn, true, 'Locating the nearest clinician…');
+    showResult('helpResult','info','Locating the nearest available clinician…');
+
+    const response = await fetch(`${API_BASE}/api/alerts/trigger`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ patientId, latitude, longitude, requiredSpecialization: emergencyType, floor, roomNumber, bedNumber })
+    });
+    const result = await response.json();
+
+    if (response.ok && result.success){
+      const d = result.dispatchedDoctor;
+      showResult('helpResult','success',
+        `<b>Physician dispatched</b>${esc(d.name)} — ${esc(d.specialization)}<br>Contact: ${esc(d.phone)}<br>Distance: ${esc(d.distance)} away<br><br>Awaiting acknowledgement from ${esc(d.name)}…`);
+      if (patientAlertPollId !== null) clearInterval(patientAlertPollId);
+      patientAlertPollId = setInterval(() => checkPatientAlertStatus(result.alertId, d), 5000);
+    } else {
+      showResult('helpResult','error','<b>No clinician available</b>' + esc(result.message || 'No physicians are currently available. Please contact emergency services.'));
+    }
+  } catch(err){
+    showResult('helpResult','error','<b>Unable to submit request</b>' + esc(err.message));
+  } finally { setBusy(btn, false); }
+}
+
+async function checkPatientAlertStatus(alertId, doctorInfo){
+  try{
+    const response = await fetch(`${API_BASE}/api/alerts/${alertId}/status`);
+    const result = await response.json();
+    if (!result.success) return;
+
+    const { status, distanceFormatted } = result.alert;
+    const liveDistance = distanceFormatted || doctorInfo.distance;
+
+    if (status === 'Pending'){
+      showResult('helpResult','success',
+        `<b>Physician dispatched</b>${esc(doctorInfo.name)} — ${esc(doctorInfo.specialization)}<br>Contact: ${esc(doctorInfo.phone)}<br>Distance: ${esc(liveDistance)} away<br><br>Awaiting acknowledgement…`);
+    } else if (status === 'Acknowledged'){
+      showResult('helpResult','success',
+        `<b>Dr. ${esc(doctorInfo.name)} has acknowledged your request and is en route.</b>Contact: ${esc(doctorInfo.phone)}<br>Distance: ${esc(liveDistance)} away`);
+    } else if (status === 'Resolved'){
+      showResult('helpResult','success','<b>Request resolved</b>This emergency has been marked as resolved. Thank you.');
+      clearInterval(patientAlertPollId);
+      patientAlertPollId = null;
+    }
+  } catch(e){ /* silent retry */ }
+}
+
+function logoutPatient(){
+  localStorage.removeItem('patientId');
+  localStorage.removeItem('patientName');
+  if (patientAlertPollId !== null){ clearInterval(patientAlertPollId); patientAlertPollId = null; }
+  loggedInPatient = null;
+  showScreen('role');
+}
+
+/* ---------- Administration ---------- */
+async function loginAdmin(){
+  const btn = document.getElementById('adminLoginBtn');
+  const password = document.getElementById('adminPassword').value;
+  if (!password){
+    showResult('adminLoginResult','error','<b>Password required</b>Please enter the administrative password.');
+    return;
+  }
+  setBusy(btn, true, 'Authenticating…');
+  try{
+    const response = await fetch(`${API_BASE}/api/admin/data`, { headers:{ 'x-admin-password': password } });
+    const result = await response.json();
+    if (response.ok && result.success){
+      adminPasswordCache = password;
+      renderAdminData(result.doctors, result.patients);
+      showScreen('admin-dashboard');
+    } else {
+      showResult('adminLoginResult','error','<b>Authentication failed</b>' + esc(result.message || 'The password provided was not accepted.'));
+    }
+  } catch(err){
+    showResult('adminLoginResult','error','<b>Connection error</b>' + esc(err.message));
+  } finally { setBusy(btn, false); }
+}
+
+async function loadAdminData(){
+  if (!adminPasswordCache) return;
+  document.getElementById('adminStatus').textContent = 'Refreshing directory…';
+  try{
+    const response = await fetch(`${API_BASE}/api/admin/data`, { headers:{ 'x-admin-password': adminPasswordCache } });
+    const result = await response.json();
+    if (result.success) renderAdminData(result.doctors, result.patients);
+  } catch(e){
+    document.getElementById('adminStatus').textContent = 'The directory could not be refreshed. Please try again.';
+  }
+}
+
+function statusClass(status){
+  if (!status) return 'unknown';
+  return String(status).toLowerCase().replace(/\s+/g,'-');
+}
+function coords(lat, lng){
+  return (lat || lat === 0) ? `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}` : '—';
+}
+
+function renderAdminData(doctors, patients){
+  const docs = doctors || [];
+  const pats = patients || [];
+
+  const docBody = document.querySelector('#doctorsTable tbody');
+  docBody.innerHTML = docs.length ? docs.map(d => `
+    <tr>
+      <td class="mono">${esc(d.doctorid)}</td>
+      <td>${esc(d.fullname)}</td>
+      <td class="mono">${esc(d.phonenumber)}</td>
+      <td>${esc(d.specialization)}</td>
+      <td>${d.status ? `<span class="pill ${statusClass(d.status)}">${esc(d.status)}</span>` : '<span class="pill unknown">Unknown</span>'}</td>
+      <td class="mono">${esc(coords(d.latitude, d.longitude))}</td>
+      <td><button class="icon-btn" type="button" title="Remove record" onclick="deleteDoctor(${Number(d.doctorid)})">🗑</button></td>
+    </tr>
+  `).join('') : '<tr class="empty-row"><td colspan="7">No clinicians are currently registered.</td></tr>';
+
+  const patBody = document.querySelector('#patientsTable tbody');
+  patBody.innerHTML = pats.length ? pats.map(p => `
+    <tr>
+      <td class="mono">${esc(p.patientid)}</td>
+      <td>${esc(p.fullname)}</td>
+      <td class="mono">${esc(p.age)}</td>
+      <td>${esc(p.gender)}</td>
+      <td>${esc(p.bloodgroup)}</td>
+      <td class="mono">${esc(p.phonenumber || '—')}</td>
+      <td class="mono">${esc(coords(p.latitude, p.longitude))}</td>
+      <td>${esc(p.registrationdate ? new Date(p.registrationdate).toLocaleString() : '—')}</td>
+      <td><button class="icon-btn" type="button" title="Remove record" onclick="deletePatient(${Number(p.patientid)})">🗑</button></td>
+    </tr>
+  `).join('') : '<tr class="empty-row"><td colspan="9">No patient records are currently held.</td></tr>';
+
+  const available = docs.filter(d => String(d.status).toLowerCase() === 'available').length;
+  document.getElementById('mDoctors').textContent = docs.length;
+  document.getElementById('mAvailable').textContent = available;
+  document.getElementById('mBusy').textContent = docs.length - available;
+  document.getElementById('mPatients').textContent = pats.length;
+  document.getElementById('doctorsRecordCount').textContent = docs.length + (docs.length === 1 ? ' record' : ' records');
+  document.getElementById('patientsRecordCount').textContent = pats.length + (pats.length === 1 ? ' record' : ' records');
+  document.getElementById('adminStatus').textContent = 'Directory last refreshed at ' + new Date().toLocaleTimeString() + '.';
+}
+
+async function deleteDoctor(id){
+  if (!confirm('Remove this clinician from the directory? This action cannot be undone.')) return;
+  await fetch(`${API_BASE}/api/admin/doctors/${id}`, { method:'DELETE', headers:{ 'x-admin-password': adminPasswordCache } });
+  loadAdminData();
+}
+async function deletePatient(id){
+  if (!confirm('Remove this patient record? This action cannot be undone.')) return;
+  await fetch(`${API_BASE}/api/admin/patients/${id}`, { method:'DELETE', headers:{ 'x-admin-password': adminPasswordCache } });
+  loadAdminData();
+}
+function logoutAdmin(){
+  adminPasswordCache = '';
+  document.getElementById('adminPassword').value = '';
+  showScreen('admin-login');
+}
+
+/* ---------- Service worker and push ---------- */
+if ("serviceWorker" in navigator){
+  navigator.serviceWorker.register("/service-worker.js")
+    .then(() => console.log("Service worker registered"))
+    .catch(err => console.error("Service worker registration failed:", err));
+}
+
+function urlBase64ToUint8Array(base64String){
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,"+").replace(/_/g,"/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+async function subscribeToPush(doctorId){
+  try{
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return;
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+    await fetch(`${API_BASE}/api/doctors/${doctorId}/subscribe`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(subscription)
+    });
+  } catch(err){
+    console.warn('Push subscription failed:', err.message);
+  }
+}
+</script>
+</body>
+</html>
