@@ -28,7 +28,7 @@ export default function PatientAccess() {
       if (res.ok) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('role', data.role);
-        localStorage.setItem('name', email);
+        localStorage.setItem('name', data.name || email);
         localStorage.setItem('userId', data.userId);
         navigate('/patient-dashboard');
       } else {
@@ -152,7 +152,10 @@ export default function PatientAccess() {
               </div>
               <div className="field">
                 <label>Contact number <span className="hint">10 digits</span></label>
-                <input type="tel" inputMode="numeric" placeholder="9876543210" maxLength="10" value={phone} onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, ''))} required />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0 15px' }}>
+                  <span style={{ color: 'var(--text-light)', fontWeight: '500' }}>+91</span>
+                  <input type="tel" inputMode="numeric" placeholder="9876543210" maxLength="10" value={phone} onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, ''))} required style={{ border: 'none', background: 'transparent', padding: '15px 0', width: '100%', outline: 'none' }} />
+                </div>
               </div>
             </div>
             <div className="field">

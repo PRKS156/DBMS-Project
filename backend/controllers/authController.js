@@ -62,12 +62,22 @@ exports.login = async (req, res) => {
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+
+    let fullName = user.email;
+    if (user.role === 'DOCTOR') {
+      const docProfile = await prisma.doctorProfile.findUnique({ where: { userId: user.id } });
+      if (docProfile) fullName = docProfile.fullName;
+    } else if (user.role === 'PATIENT') {
+      const patProfile = await prisma.patientProfile.findUnique({ where: { userId: user.id } });
+      if (patProfile) fullName = patProfile.fullName;
+    }
+
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET || 'supersecretkey',
       { expiresIn: '1h' }
     );
-    res.json({ message: 'Login successful', token, role: user.role, userId: user.id });
+    res.json({ message: 'Login successful', token, role: user.role, userId: user.id, name: fullName });
   } catch (error) {
     res.status(500).json({ error: 'Login error' });
   }
