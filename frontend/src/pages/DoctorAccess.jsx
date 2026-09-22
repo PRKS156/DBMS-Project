@@ -126,12 +126,12 @@ export default function DoctorAccess() {
             </div>
             <div className="field">
               <label>Full name</label>
-              <input type="text" placeholder="Dr. Jane Smith" value={name} onChange={e => setName(e.target.value)} required />
+              <input type="text" placeholder="Dr. Jane Smith" value={name} onChange={e => setName(e.target.value.replace(/[^A-Za-z. ]/g, ''))} required />
             </div>
             <div className="split">
               <div className="field">
-                <label>Contact number</label>
-                <input type="tel" placeholder="9876543210" value={phone} onChange={e => setPhone(e.target.value)} required />
+                <label>Contact number <span className="hint">10 digits</span></label>
+                <input type="tel" inputMode="numeric" placeholder="9876543210" maxLength="10" value={phone} onChange={e => setPhone(e.target.value.replace(/[^0-9]/g, ''))} required />
               </div>
               <div className="field">
                 <label>Clinical specialisation</label>
@@ -142,8 +142,8 @@ export default function DoctorAccess() {
               </div>
             </div>
             <div className="field">
-              <label>Create password</label>
-              <input type="password" placeholder="Choose a secure password" value={password} onChange={e => setPassword(e.target.value)} required />
+              <label>Create password <span className="hint">Minimum 4 characters</span></label>
+              <input type="password" placeholder="Choose a secure password" minLength="4" value={password} onChange={e => setPassword(e.target.value)} required />
             </div>
             <button className="btn teal" type="submit">Create professional profile <span aria-hidden="true">→</span></button>
           </form>
