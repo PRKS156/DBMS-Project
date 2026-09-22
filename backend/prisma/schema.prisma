@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  DOCTOR
+  PATIENT
+  DISPATCHER
+}
+
+enum AlertStatus {
+  PENDING
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+// 1. User Entity
+model User {
+  id             Int             @id @default(autoincrement())
+  email          String          @unique
+  password       String
+  role           Role            @default(PATIENT)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  doctorProfile  DoctorProfile?
+  patientProfile PatientProfile?
+  feedbacks      Feedback[]
+}
+
+// 2. DoctorProfile Entity
+model DoctorProfile {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName       String
+  specialization String
+  phoneNumber    String
+  isAvailable    Boolean   @default(true)
+  currentLat     Float?
+  currentLng     Float?
+
+  dispatches     DispatchRecord[]
+}
+
+// 3. PatientProfile Entity
+model PatientProfile {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName       String
+  phoneNumber    String
+  medicalHistory String?
+  bloodGroup     String?
+
+  alerts         EmergencyAlert[]
+}
+
+// 4. Hospital Entity
+model Hospital {
+  id             Int       @id @default(autoincrement())
+  name           String
+  address        String
+  latitude       Float
+  longitude      Float
+  contactNumber  String
+
+  dispatches     DispatchRecord[]
+}
+
+// 5. Vehicle Entity
+model Vehicle {
+  id             Int       @id @default(autoincrement())
+  licensePlate   String    @unique
+  type           String    // e.g., Basic Life Support, Advanced Life Support
+  isAvailable    Boolean   @default(true)
+
+  dispatches     DispatchRecord[]
+}
+
+// 6. EmergencyAlert Entity
+model EmergencyAlert {
+  id             Int       @id @default(autoincrement())
+  patientId      Int
+  patient        PatientProfile @relation(fields: [patientId], references: [id])
+  latitude       Float
+  longitude      Float
+  status         AlertStatus    @default(PENDING)
+  description    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  dispatchRecord DispatchRecord?
+}
+
+// 7. DispatchRecord Entity (Relationship Table)
+model DispatchRecord {
+  id             Int       @id @default(autoincrement())
+  alertId        Int       @unique
+  alert          EmergencyAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  
+  doctorId       Int?
+  doctor         DoctorProfile? @relation(fields: [doctorId], references: [id])
+  
+  vehicleId      Int?
+  vehicle        Vehicle?       @relation(fields: [vehicleId], references: [id])
+  
+  hospitalId     Int?
+  hospital       Hospital?      @relation(fields: [hospitalId], references: [id])
+  
+  dispatchedAt   DateTime       @default(now())
+  completedAt    DateTime?
+
+  feedback       Feedback?
+}
+
+// 8. Feedback Entity
+model Feedback {
+  id               Int       @id @default(autoincrement())
+  dispatchRecordId Int       @unique
+  dispatchRecord   DispatchRecord @relation(fields: [dispatchRecordId], references: [id], onDelete: Cascade)
+  
+  userId           Int
+  user             User      @relation(fields: [userId], references: [id])
+  
+  rating           Int       // 1-5
+  comments         String?
+  createdAt        DateTime  @default(now())
+}
