@@ -12,12 +12,27 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [adminStats, setAdminStats] = useState({ totalDoctors: 0, availableDoctors: 0, busyOrOffDuty: 0, totalPatients: 0 });
 
   useEffect(() => {
     if (!token) {
       navigate('/');
+    } else if (role === 'ADMIN') {
+      fetchAdminStats();
     }
-  }, [token, navigate]);
+  }, [token, navigate, role]);
+
+  const fetchAdminStats = async () => {
+    try {
+      const res = await fetch('https://emergency-backend-3ppk.onrender.com/api/admin/data');
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAdminStats(data.stats);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const handleLogout = () => {
     localStorage.clear();
@@ -34,16 +49,16 @@ export default function Dashboard() {
             <p className="sub">A current view of registered clinicians and patient records held by the service.</p>
           </div>
           <div className="dash-actions">
-            <button className="btn-sm ghost" type="button">Refresh directory</button>
+            <button className="btn-sm ghost" type="button" onClick={fetchAdminStats}>Refresh directory</button>
             <button className="btn-sm plain" type="button" onClick={handleLogout}>Sign out</button>
           </div>
         </div>
         
         <div className="metrics">
-          <div className="metric"><span>Registered clinicians</span><strong>0</strong></div>
-          <div className="metric ok"><span>Currently available</span><strong>0</strong></div>
-          <div className="metric busy"><span>Engaged or off duty</span><strong>0</strong></div>
-          <div className="metric"><span>Patient records</span><strong>0</strong></div>
+          <div className="metric"><span>Registered clinicians</span><strong>{adminStats.totalDoctors}</strong></div>
+          <div className="metric ok"><span>Currently available</span><strong>{adminStats.availableDoctors}</strong></div>
+          <div className="metric busy"><span>Engaged or off duty</span><strong>{adminStats.busyOrOffDuty}</strong></div>
+          <div className="metric"><span>Patient records</span><strong>{adminStats.totalPatients}</strong></div>
         </div>
       </section>
     );
