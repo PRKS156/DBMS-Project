@@ -6,6 +6,12 @@ export default function Dashboard() {
   const role = localStorage.getItem('role');
   const token = localStorage.getItem('token');
   const [active, setActive] = useState(false);
+  const [emergencyType, setEmergencyType] = useState('Unsure / General');
+  const [floor, setFloor] = useState('');
+  const [room, setRoom] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -81,6 +87,48 @@ export default function Dashboard() {
   }
 
   if (role === 'PATIENT') {
+    const handleEmergencySubmit = () => {
+      setLoading(true);
+      setError('');
+      setSuccess('');
+      
+      if (!navigator.geolocation) {
+        setError('Geolocation is not supported by your browser.');
+        setLoading(false);
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        try {
+          const res = await fetch('https://emergency-backend-3ppk.onrender.com/api/alerts/trigger', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              patientId: parseInt(localStorage.getItem('userId')),
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              requiredSpecialization: emergencyType,
+              floor,
+              roomNumber: room
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            setSuccess(data.message);
+          } else {
+            setError(data.message || 'Failed to dispatch.');
+          }
+        } catch (err) {
+          setError('Failed to connect to the dispatch network.');
+        } finally {
+          setLoading(false);
+        }
+      }, () => {
+        setError('Location permission denied. Cannot dispatch emergency services.');
+        setLoading(false);
+      });
+    };
+
     return (
       <section className="screen active card">
         <div className="heading">
@@ -91,21 +139,27 @@ export default function Dashboard() {
         <div className="form">
           <div className="field">
             <label>Nature of the emergency</label>
-            <select>
+            <select value={emergencyType} onChange={e => setEmergencyType(e.target.value)}>
               <optgroup label="Common presentations">
-                <option>Cardiac emergency</option>
-                <option>Severe injury or accident</option>
+                <option value="Cardiology">Cardiac emergency</option>
+                <option value="Trauma Surgery">Severe injury or accident</option>
+                <option value="Pediatrics">Pediatric emergency</option>
+                <option value="Orthopedics">Bone or joint injury</option>
               </optgroup>
-              <option>Uncertain — please assess</option>
+              <option value="Unsure / General">Uncertain — please assess</option>
             </select>
           </div>
           <p className="caption">Where known, please provide your on-site location so that the attending clinician can reach you without delay.</p>
           <div className="split">
-            <div className="field"><label>Floor</label><input type="text" placeholder="Third floor" /></div>
-            <div className="field"><label>Room</label><input type="text" placeholder="Room 312" /></div>
+            <div className="field"><label>Floor</label><input type="text" placeholder="Third floor" value={floor} onChange={e => setFloor(e.target.value)} /></div>
+            <div className="field"><label>Room</label><input type="text" placeholder="Room 312" value={room} onChange={e => setRoom(e.target.value)} /></div>
           </div>
         </div>
-        <button className="btn red" type="button">Submit emergency request <span aria-hidden="true">→</span></button>
+        <button className="btn red" type="button" onClick={handleEmergencySubmit} disabled={loading}>
+          {loading ? 'Transmitting...' : 'Submit emergency request'} <span aria-hidden="true">→</span>
+        </button>
+        {error && <div className="result error" style={{display:'block', marginTop: '15px'}}>{error}</div>}
+        {success && <div className="result success" style={{display:'block', marginTop: '15px'}}>{success}</div>}
         <div className="screen-footer">
           <button className="link back" style={{background:'none', border:'none'}} onClick={handleLogout}>Sign out</button>
         </div>

@@ -27,6 +27,7 @@ export default function DoctorAccess() {
         localStorage.setItem('token', data.token);
         localStorage.setItem('role', data.role);
         localStorage.setItem('name', email);
+        localStorage.setItem('userId', data.userId);
         navigate('/doctor-dashboard');
       } else {
         setError(data.error || 'Login failed');

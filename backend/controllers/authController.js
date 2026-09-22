@@ -67,7 +67,7 @@ exports.login = async (req, res) => {
       process.env.JWT_SECRET || 'supersecretkey',
       { expiresIn: '1h' }
     );
-    res.json({ message: 'Login successful', token, role: user.role });
+    res.json({ message: 'Login successful', token, role: user.role, userId: user.id });
   } catch (error) {
     res.status(500).json({ error: 'Login error' });
   }

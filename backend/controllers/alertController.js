@@ -1,11 +1,20 @@
-const webpush = require('web-push');
+const prisma = require('../config/db.js');
 
-webpush.setVapidDetails(
-    'mailto:youremail@example.com',
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-);
-const pool = require('../config/db.js');
+// Haversine distance formula in meters
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3; // metres
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+}
 
 exports.triggerAlert = async (req, res) => {
     const { patientId, latitude, longitude, requiredSpecialization, floor, roomNumber, bedNumber } = req.body;
@@ -18,52 +27,77 @@ exports.triggerAlert = async (req, res) => {
     }
 
     try {
-        let closestDoctor = null;
         let isFallback = false;
 
-        if (requiredSpecialization && requiredSpecialization !== 'Unsure / General') {
-            const specialistQuery = `
-                SELECT 
-                    d.doctorid, d.fullname, d.phonenumber, d.specialization,
-                    ST_DistanceSphere(da.currentlocation, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS distance_meters
-                FROM doctor d
-                INNER JOIN doctor_availability da ON d.doctorid = da.doctorid
-                WHERE da.status = 'Available' AND d.specialization = $3
-                ORDER BY distance_meters ASC, d.doctorid ASC
-                LIMIT 1;
-            `;
-            const specialistResult = await pool.query(specialistQuery, [lng, lat, requiredSpecialization]);
-            if (specialistResult.rows.length > 0) closestDoctor = specialistResult.rows[0];
+        // Fetch all available doctors
+        let availableDoctors = await prisma.doctorProfile.findMany({
+            where: { isAvailable: true, currentLat: { not: null }, currentLng: { not: null } }
+        });
+
+        if (availableDoctors.length === 0) {
+            return res.status(200).json({ success: false, message: "No physicians are currently available." });
         }
 
+        // Compute distances
+        let doctorsWithDistance = availableDoctors.map(doc => {
+            return {
+                ...doc,
+                distance_meters: getDistance(lat, lng, doc.currentLat, doc.currentLng)
+            };
+        });
+
+        // Try finding a specialist first
+        let closestDoctor = null;
+        if (requiredSpecialization && requiredSpecialization !== 'Unsure / General') {
+            const specialists = doctorsWithDistance.filter(d => d.specialization === requiredSpecialization);
+            if (specialists.length > 0) {
+                specialists.sort((a, b) => a.distance_meters - b.distance_meters);
+                closestDoctor = specialists[0];
+            }
+        }
+
+        // Fallback to closest general available doctor
         if (!closestDoctor) {
             isFallback = true;
-            const generalQuery = `
-                SELECT 
-                    d.doctorid, d.fullname, d.phonenumber, d.specialization,
-                    ST_DistanceSphere(da.currentlocation, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS distance_meters
-                FROM doctor d
-                INNER JOIN doctor_availability da ON d.doctorid = da.doctorid
-                WHERE da.status = 'Available'
-                ORDER BY distance_meters ASC, d.doctorid ASC
-                LIMIT 1;
-            `;
-            const generalResult = await pool.query(generalQuery, [lng, lat]);
-            if (generalResult.rows.length > 0) closestDoctor = generalResult.rows[0];
+            doctorsWithDistance.sort((a, b) => a.distance_meters - b.distance_meters);
+            closestDoctor = doctorsWithDistance[0];
         }
 
         if (!closestDoctor) {
             return res.status(200).json({ success: false, message: "No physicians are currently available in your area." });
         }
 
-        // Log this dispatch as an active alert for the doctor to see
-        const alertInsert = await pool.query(
-            `INSERT INTO alert (patientid, doctorid, floor, roomnumber, bednumber, status)
-             VALUES ($1, $2, $3, $4, $5, 'Pending')
-             RETURNING alertid`,
-            [patientId || null, closestDoctor.doctorid, floor || null, roomNumber || null, bedNumber || null]
-        );
-        const newAlertId = alertInsert.rows[0].alertid;
+        // Get actual PatientProfile ID based on the userId passed in (if valid)
+        let patientProfileId = null;
+        if (patientId) {
+            const profile = await prisma.patientProfile.findUnique({
+                where: { userId: parseInt(patientId) }
+            });
+            if (profile) patientProfileId = profile.id;
+        }
+
+        // If no patient profile found, we might need a default or error
+        if (!patientProfileId) {
+             return res.status(400).json({ success: false, message: "Patient profile not found. Please log in." });
+        }
+
+        // Create the EmergencyAlert and DispatchRecord
+        const newAlert = await prisma.emergencyAlert.create({
+            data: {
+                patientId: patientProfileId,
+                latitude: lat,
+                longitude: lng,
+                status: 'PENDING',
+                description: `Floor ${floor || 'N/A'}, Room ${roomNumber || 'N/A'}, Bed ${bedNumber || 'N/A'}`
+            }
+        });
+
+        await prisma.dispatchRecord.create({
+            data: {
+                alertId: newAlert.id,
+                doctorId: closestDoctor.id
+            }
+        });
 
         const distanceFormatted = closestDoctor.distance_meters > 1000 
             ? `${(closestDoctor.distance_meters / 1000).toFixed(2)} km`
@@ -77,75 +111,85 @@ exports.triggerAlert = async (req, res) => {
             success: true,
             message: dispatchMessage,
             isFallback: isFallback,
-            alertId: newAlertId,
+            alertId: newAlert.id,
             dispatchedDoctor: {
-                id: closestDoctor.doctorid,
-                name: closestDoctor.fullname,
-                phone: closestDoctor.phonenumber,
+                id: closestDoctor.id,
+                name: closestDoctor.fullName,
+                phone: closestDoctor.phoneNumber,
                 specialization: closestDoctor.specialization,
                 distance: distanceFormatted
             }
         });
 
     } catch (error) {
-        const realMessage = error.errors?.length 
-            ? error.errors.map(e => e.message).join(' | ') 
-            : error.message || error.code || 'Unknown error (no message)';
-        console.error("❌ Query Failure:", realMessage);
-        return res.status(500).json({ success: false, message: "Database query failed.", debug: realMessage });
+        console.error("❌ Alert Trigger Failure:", error);
+        return res.status(500).json({ success: false, message: "Database query failed.", debug: error.message });
     }
 };
+
 exports.getAlertStatus = async (req, res) => {
     const { id } = req.params;
     try {
-        const result = await pool.query(
-            `SELECT a.alertid, a.status,
-                    d.fullname AS doctorname, d.phonenumber AS doctorphone, d.specialization,
-                    ST_DistanceSphere(da.currentlocation, p.lastlocation) AS distance_meters
-             FROM alert a
-             LEFT JOIN doctor d ON a.doctorid = d.doctorid
-             LEFT JOIN doctor_availability da ON d.doctorid = da.doctorid
-             LEFT JOIN patient p ON a.patientid = p.patientid
-             WHERE a.alertid = $1`,
-            [id]
-        );
-        if (result.rows.length === 0) {
+        const dispatch = await prisma.dispatchRecord.findUnique({
+            where: { alertId: parseInt(id) },
+            include: {
+                alert: { include: { patient: true } },
+                doctor: true
+            }
+        });
+
+        if (!dispatch) {
             return res.status(404).json({ success: false, message: "Alert not found." });
         }
 
-        const alert = result.rows[0];
-        let distanceFormatted = null;
-        if (alert.distance_meters !== null) {
-            distanceFormatted = alert.distance_meters > 1000
-                ? `${(alert.distance_meters / 1000).toFixed(2)} km`
-                : `${Math.round(alert.distance_meters)} meters`;
+        let distanceFormatted = "Unknown";
+        if (dispatch.doctor && dispatch.doctor.currentLat && dispatch.alert.latitude) {
+             const dist = getDistance(dispatch.alert.latitude, dispatch.alert.longitude, dispatch.doctor.currentLat, dispatch.doctor.currentLng);
+             distanceFormatted = dist > 1000 ? `${(dist / 1000).toFixed(2)} km` : `${Math.round(dist)} meters`;
         }
 
         return res.status(200).json({
             success: true,
-            alert: { ...alert, distanceFormatted }
+            alert: {
+                alertid: dispatch.alert.id,
+                status: dispatch.alert.status,
+                doctorname: dispatch.doctor ? dispatch.doctor.fullName : 'N/A',
+                doctorphone: dispatch.doctor ? dispatch.doctor.phoneNumber : 'N/A',
+                specialization: dispatch.doctor ? dispatch.doctor.specialization : 'N/A',
+                distanceFormatted
+            }
         });
     } catch (error) {
-        console.error("❌ Get Alert Status Failure:", error.message);
         return res.status(500).json({ success: false, message: "Failed to fetch alert status.", debug: error.message });
     }
 };
 
 exports.getDoctorAlerts = async (req, res) => {
-    const { doctorId } = req.params;
+    const { doctorId } = req.params; // this might be userId of doctor, we need DoctorProfile id
     try {
-        const result = await pool.query(
-            `SELECT a.alertid, a.floor, a.roomnumber, a.bednumber, a.status, a.createdat,
-                    p.fullname AS patientname, p.age, p.gender, p.bloodgroup, p.phonenumber AS patientphone
-             FROM alert a
-             LEFT JOIN patient p ON a.patientid = p.patientid
-             WHERE a.doctorid = $1 AND a.status = 'Pending'
-             ORDER BY a.createdat DESC`,
-            [doctorId]
-        );
-        return res.status(200).json({ success: true, alerts: result.rows });
+        const docProfile = await prisma.doctorProfile.findUnique({ where: { userId: parseInt(doctorId) }});
+        if (!docProfile) return res.status(404).json({ success: false, message: "Doctor profile not found." });
+
+        const dispatches = await prisma.dispatchRecord.findMany({
+            where: { doctorId: docProfile.id, alert: { status: 'PENDING' } },
+            include: { alert: { include: { patient: true } } },
+            orderBy: { dispatchedAt: 'desc' }
+        });
+
+        const mappedAlerts = dispatches.map(d => ({
+            alertid: d.alert.id,
+            description: d.alert.description,
+            status: d.alert.status,
+            createdat: d.alert.createdAt,
+            patientname: d.alert.patient.fullName,
+            age: d.alert.patient.age,
+            gender: d.alert.patient.gender,
+            bloodgroup: d.alert.patient.bloodGroup,
+            patientphone: d.alert.patient.phoneNumber
+        }));
+
+        return res.status(200).json({ success: true, alerts: mappedAlerts });
     } catch (error) {
-        console.error("❌ Get Alerts Failure:", error.message);
         return res.status(500).json({ success: false, message: "Failed to fetch alerts.", debug: error.message });
     }
 };
@@ -153,10 +197,12 @@ exports.getDoctorAlerts = async (req, res) => {
 exports.acknowledgeAlert = async (req, res) => {
     const { id } = req.params;
     try {
-        await pool.query(`UPDATE alert SET status = 'Acknowledged' WHERE alertid = $1`, [id]);
+        await prisma.emergencyAlert.update({
+            where: { id: parseInt(id) },
+            data: { status: 'DISPATCHED' } // Enum AlertStatus is PENDING, DISPATCHED, COMPLETED, CANCELLED
+        });
         return res.status(200).json({ success: true, message: "Alert acknowledged." });
     } catch (error) {
-        console.error("❌ Acknowledge Alert Failure:", error.message);
         return res.status(500).json({ success: false, message: "Failed to acknowledge alert.", debug: error.message });
     }
 };

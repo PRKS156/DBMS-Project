@@ -29,6 +29,7 @@ export default function PatientAccess() {
         localStorage.setItem('token', data.token);
         localStorage.setItem('role', data.role);
         localStorage.setItem('name', email);
+        localStorage.setItem('userId', data.userId);
         navigate('/patient-dashboard');
       } else {
         setError(data.error || 'Login failed');
