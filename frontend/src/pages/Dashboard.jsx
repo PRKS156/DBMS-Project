@@ -50,6 +50,37 @@ export default function Dashboard() {
   }
 
   if (role === 'DOCTOR') {
+    const handleDutyToggle = (goOnDuty) => {
+      if (goOnDuty) {
+        if (!navigator.geolocation) {
+          setError('Geolocation is not supported by your browser.');
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+          try {
+            const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/location`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude
+              })
+            });
+            if (res.ok) setActive(true);
+          } catch (err) {
+            console.error(err);
+          }
+        });
+      } else {
+        // Go off duty
+        fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: false })
+        }).then(() => setActive(false));
+      }
+    };
+
     return (
       <section className="screen active card">
         <div className="heading">
@@ -68,14 +99,14 @@ export default function Dashboard() {
                 <li>Remain available until you formally conclude your on-duty session.</li>
               </ul>
             </div>
-            <button className="btn teal" type="button" onClick={() => setActive(true)}><span aria-hidden="true">●</span> Commence on-duty session</button>
+            <button className="btn teal" type="button" onClick={() => handleDutyToggle(true)}><span aria-hidden="true">●</span> Commence on-duty session</button>
           </>
         ) : (
           <>
             <div className="duty">Your location is being shared with the dispatch system.</div>
             <div className="alerts-head"><h3>Assigned emergency requests</h3><span className="count-pill">0 active</span></div>
             <div className="empty-note">No requests have been assigned to you at this time. This view refreshes automatically.</div>
-            <button className="btn navy" type="button" onClick={() => setActive(false)}>Conclude on-duty session</button>
+            <button className="btn navy" type="button" onClick={() => handleDutyToggle(false)}>Conclude on-duty session</button>
           </>
         )}
         
