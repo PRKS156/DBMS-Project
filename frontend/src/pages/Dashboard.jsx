@@ -49,6 +49,29 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [role, activeAlertId]);
 
+  useEffect(() => {
+    let locationInterval;
+    if (role === 'DOCTOR' && active) {
+      locationInterval = setInterval(() => {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(async (pos) => {
+            try {
+              await fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/location`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  latitude: pos.coords.latitude,
+                  longitude: pos.coords.longitude
+                })
+              });
+            } catch (err) { console.error(err); }
+          });
+        }
+      }, 10000); // Update doctor's live location every 10 seconds
+    }
+    return () => clearInterval(locationInterval);
+  }, [role, active]);
+
   const fetchDoctorAlerts = async () => {
     try {
       const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/doctor/${localStorage.getItem('userId')}`);
