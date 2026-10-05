@@ -17,6 +17,12 @@ exports.updateLocation = async (req, res) => {
                 isAvailable: true // Automatically set available when they update location
             }
         });
+
+        // Emit real-time location update to any patients tracking this doctor
+        if (req.app.locals.io) {
+            req.app.locals.io.emit(`doctorLocation_${id}`, { latitude, longitude });
+        }
+
         return res.status(200).json({ success: true, message: "Location and availability updated." });
     } catch (error) {
         console.error("❌ Location Update Failure:", error.message);

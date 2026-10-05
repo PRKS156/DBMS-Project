@@ -69,3 +69,56 @@ exports.deletePatient = async (req, res) => {
         return res.status(500).json({ success: false, message: "Delete failed.", debug: error.message });
     }
 };
+
+exports.getAnalytics = async (req, res) => {
+    try {
+        const dispatches = await prisma.dispatchRecord.findMany({
+            include: { alert: true }
+        });
+
+        let totalResponseTimeMs = 0;
+        let respondedCount = 0;
+        const emergencyTypes = {};
+        const areaCases = {};
+
+        dispatches.forEach(d => {
+            if (d.dispatchedAt && d.alert && d.alert.createdAt) {
+                const diff = new Date(d.dispatchedAt) - new Date(d.alert.createdAt);
+                if (diff > 0) {
+                    totalResponseTimeMs += diff;
+                    respondedCount++;
+                }
+            }
+
+            if (d.alert && d.alert.description) {
+                // description format: "Cardiology | Landmark: Central Park"
+                const parts = d.alert.description.split(' | ');
+                const type = parts[0]?.trim() || 'Unknown';
+                const area = parts.length > 1 ? parts.slice(1).join(' ').trim() : 'Unknown Area';
+
+                emergencyTypes[type] = (emergencyTypes[type] || 0) + 1;
+                
+                // Group by general area keywords if possible, else use raw
+                let areaKey = area.includes('Landmark:') ? area.split('Landmark:')[1].trim() : 'Building/Hospital';
+                areaCases[areaKey] = (areaCases[areaKey] || 0) + 1;
+            }
+        });
+
+        const avgResponseTimeSeconds = respondedCount > 0 ? Math.round(totalResponseTimeMs / respondedCount / 1000) : 0;
+        
+        // Format for Recharts
+        const typeData = Object.keys(emergencyTypes).map(key => ({ name: key, value: emergencyTypes[key] }));
+        const areaData = Object.keys(areaCases).map(key => ({ name: key, cases: areaCases[key] }));
+
+        return res.status(200).json({
+            success: true,
+            avgResponseTimeSeconds,
+            totalAlerts: dispatches.length,
+            emergencyTypes: typeData,
+            areaCases: areaData
+        });
+    } catch (error) {
+        console.error("❌ Analytics Fetch Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to fetch analytics." });
+    }
+};

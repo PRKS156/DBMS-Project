@@ -1,5 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
+import L from 'leaflet';
+
+// Fix leaflet icon issue
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+let DefaultIcon = L.icon({ iconUrl: icon, shadowUrl: iconShadow, iconAnchor: [12, 41] });
+L.Marker.prototype.options.icon = DefaultIcon;
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -20,18 +33,41 @@ export default function Dashboard() {
   const [doctorAlerts, setDoctorAlerts] = useState([]);
   const [activeAlertId, setActiveAlertId] = useState(null);
   const [activeAlertDetails, setActiveAlertDetails] = useState(null);
+  const [adminAnalytics, setAdminAnalytics] = useState(null);
+  const [doctorLoc, setDoctorLoc] = useState(null);
+  const socketRef = useRef(null);
 
   useEffect(() => {
     if (!token) {
       navigate('/');
     } else if (role === 'ADMIN') {
       fetchAdminStats();
+      fetchAdminAnalytics();
     } else if (role === 'DOCTOR') {
       fetchDoctorAlerts();
       const interval = setInterval(fetchDoctorAlerts, 5000);
       return () => clearInterval(interval);
     }
+
+    if (role === 'PATIENT') {
+      socketRef.current = io('https://emergency-backend-3ppk.onrender.com');
+      socketRef.current.on('alertUpdate', (data) => {
+        if (data.status === 'DISPATCHED') {
+          setActiveAlertDetails(prev => prev ? { ...prev, status: 'DISPATCHED' } : prev);
+        }
+      });
+      return () => socketRef.current.disconnect();
+    }
   }, [token, navigate, role]);
+
+  useEffect(() => {
+    if (role === 'PATIENT' && activeAlertId && socketRef.current) {
+      socketRef.current.emit('joinAlertRoom', activeAlertId);
+      socketRef.current.on(`doctorLocation`, (loc) => {
+         setDoctorLoc(loc);
+      });
+    }
+  }, [role, activeAlertId]);
 
   useEffect(() => {
     let interval;
@@ -42,6 +78,10 @@ export default function Dashboard() {
           const data = await res.json();
           if (res.ok && data.success) {
             setActiveAlertDetails(data.alert);
+            if (data.alert.doctorId) {
+              // Listen to specific doctor location updates once assigned
+              socketRef.current.on(`doctorLocation_${data.alert.doctorId}`, (loc) => setDoctorLoc(loc));
+            }
           }
         } catch(err) { console.error(err); }
       };
@@ -109,6 +149,14 @@ export default function Dashboard() {
     }
   };
 
+  const fetchAdminAnalytics = async () => {
+    try {
+      const res = await fetch('https://emergency-backend-3ppk.onrender.com/api/admin/analytics');
+      const data = await res.json();
+      if (res.ok && data.success) setAdminAnalytics(data);
+    } catch (err) { console.error(err); }
+  };
+
   const deleteAdminRecord = async (type, id) => {
     try {
       await fetch(`https://emergency-backend-3ppk.onrender.com/api/admin/${type}/${id}`, { method: 'DELETE' });
@@ -160,6 +208,43 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
+
+        {adminAnalytics && (
+          <div style={{ marginTop: '3rem', borderTop: '1px solid #eee', paddingTop: '2rem' }}>
+            <h2>System Analytics</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '1rem' }}>
+              <div style={{ border: '1px solid #ddd', padding: '1rem', borderRadius: '8px' }}>
+                <h3>Emergencies by Area</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={adminAnalytics.areaCases} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" />
+                    <YAxis dataKey="name" type="category" width={100} />
+                    <Tooltip />
+                    <Bar dataKey="cases" fill="var(--primary)" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{ border: '1px solid #ddd', padding: '1rem', borderRadius: '8px' }}>
+                <h3>Emergency Types</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie data={adminAnalytics.emergencyTypes} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
+                      {adminAnalytics.emergencyTypes.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bedcd4' }}>
+              <strong>Average Dispatch Response Time: </strong> {adminAnalytics.avgResponseTimeSeconds} seconds
+            </div>
+          </div>
+        )}
 
         <div style={{ marginTop: '2rem' }}>
           <h3>Patient Records</h3>
@@ -247,7 +332,8 @@ export default function Dashboard() {
                       <strong>{alert.patientname} ({alert.age}y, {alert.gender}) - Blood: {alert.bloodgroup}</strong>
                       <span className="count-pill" style={{backgroundColor: alert.status === 'PENDING' ? '#ffeb3b' : '#c8e6c9', color: '#000'}}>{alert.status}</span>
                     </div>
-                    <p style={{ margin: '0 0 10px 0' }}><strong>Location:</strong> {alert.description}</p>
+                    <p style={{ margin: '0 0 5px 0' }}><strong>Location:</strong> {alert.description}</p>
+                    <p style={{ margin: '0 0 10px 0' }}><strong>Medical History:</strong> {alert.medicalHistory || 'None provided'}</p>
                     <p style={{ margin: '0 0 15px 0' }}><strong>Contact:</strong> {alert.patientphone}</p>
                     {alert.status === 'PENDING' && (
                       <button className="btn teal" onClick={() => acknowledgeAlert(alert.alertid)}>Acknowledge En Route</button>
@@ -328,10 +414,25 @@ export default function Dashboard() {
           <div style={{ padding: '20px', border: '2px solid var(--primary)', borderRadius: '12px', backgroundColor: '#f0fdf4', color: '#0f2a31' }}>
             <h3 style={{ color: 'var(--primary)', margin: '0 0 15px 0' }}>Doctor is on the way</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div><strong>Doctor:</strong><br/>{activeAlertDetails.doctorname}</div>
-              <div><strong>Specialty:</strong><br/>{activeAlertDetails.specialization}</div>
-              <div><strong>Phone:</strong><br/>{activeAlertDetails.doctorphone}</div>
-              <div><strong>Distance:</strong><br/>{activeAlertDetails.distanceFormatted} away</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                <div><strong>Doctor:</strong><br/>{activeAlertDetails.doctorname}</div>
+                <div><strong>Specialty:</strong><br/>{activeAlertDetails.specialization}</div>
+                <div><strong>Phone:</strong><br/>{activeAlertDetails.doctorphone}</div>
+                <div><strong>Distance:</strong><br/>{activeAlertDetails.distanceFormatted} away</div>
+              </div>
+              <div style={{ height: '200px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #bedcd4' }}>
+                <MapContainer center={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  <Marker position={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]}>
+                    <Popup>Your Location</Popup>
+                  </Marker>
+                  {doctorLoc && (
+                    <Marker position={[doctorLoc.latitude, doctorLoc.longitude]}>
+                      <Popup>Doctor Location</Popup>
+                    </Marker>
+                  )}
+                </MapContainer>
+              </div>
             </div>
             
             <div style={{ marginTop: '20px', padding: '15px', borderRadius: '8px', backgroundColor: activeAlertDetails.status === 'PENDING' ? '#fff3cd' : '#d4edda', color: '#0f2a31' }}>

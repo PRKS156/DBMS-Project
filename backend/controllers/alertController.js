@@ -194,7 +194,8 @@ exports.getDoctorAlerts = async (req, res) => {
             age: d.alert.patient.age,
             gender: d.alert.patient.gender,
             bloodgroup: d.alert.patient.bloodGroup,
-            patientphone: d.alert.patient.phoneNumber
+            patientphone: d.alert.patient.phoneNumber,
+            medicalHistory: d.alert.patient.medicalHistory
         }));
 
         return res.status(200).json({ success: true, alerts: mappedAlerts });
@@ -210,6 +211,12 @@ exports.acknowledgeAlert = async (req, res) => {
             where: { id: parseInt(id) },
             data: { status: 'DISPATCHED' } // Enum AlertStatus is PENDING, DISPATCHED, COMPLETED, CANCELLED
         });
+
+        // Emit real-time update to the patient tracking this alert
+        if (req.app.locals.io) {
+            req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'DISPATCHED' });
+        }
+
         return res.status(200).json({ success: true, message: "Alert acknowledged." });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Failed to acknowledge alert.", debug: error.message });

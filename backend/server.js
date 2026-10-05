@@ -28,6 +28,36 @@ app.get('/', (req, res) => {
 
 // Dynamic port configuration rule allowing Render to pass down random cloud ports automatically
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
+
+// Setup HTTP server and Socket.io for real-time updates
+const http = require('http');
+const { Server } = require('socket.io');
+
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: '*', // Allow all origins for the Vercel frontend
+        methods: ['GET', 'POST', 'PATCH']
+    }
+});
+
+io.on('connection', (socket) => {
+    console.log(`🔌 New client connected: ${socket.id}`);
+    
+    // Clients can join a room based on their alert ID or userId to receive targeted updates
+    socket.on('joinAlertRoom', (alertId) => {
+        socket.join(`alert_${alertId}`);
+        console.log(`Client joined room: alert_${alertId}`);
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`🔌 Client disconnected: ${socket.id}`);
+    });
+});
+
+// Make io accessible in controllers
+app.locals.io = io;
+
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Emergency API Server is actively running on port ${PORT}`);
 });
