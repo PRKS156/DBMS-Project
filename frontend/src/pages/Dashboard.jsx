@@ -7,8 +7,10 @@ export default function Dashboard() {
   const token = localStorage.getItem('token');
   const [active, setActive] = useState(false);
   const [emergencyType, setEmergencyType] = useState('Unsure / General');
+  const [locationType, setLocationType] = useState('Outside');
   const [floor, setFloor] = useState('');
   const [room, setRoom] = useState('');
+  const [landmark, setLandmark] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
@@ -288,8 +290,10 @@ export default function Dashboard() {
               latitude: pos.coords.latitude,
               longitude: pos.coords.longitude,
               requiredSpecialization: emergencyType,
-              floor,
-              roomNumber: room
+              locationType,
+              floor: locationType === 'Building' ? floor : undefined,
+              roomNumber: locationType === 'Building' ? room : undefined,
+              landmark: locationType === 'Outside' ? landmark : undefined
             })
           });
           const data = await res.json();
@@ -353,11 +357,25 @@ export default function Dashboard() {
                   <option value="Unsure / General">Uncertain — please assess</option>
                 </select>
               </div>
-              <p className="caption">Where known, please provide your on-site location so that the attending clinician can reach you without delay.</p>
-              <div className="split">
-                <div className="field"><label>Floor</label><input type="text" placeholder="Third floor" value={floor} onChange={e => setFloor(e.target.value)} /></div>
-                <div className="field"><label>Room</label><input type="text" placeholder="Room 312" value={room} onChange={e => setRoom(e.target.value)} /></div>
+              <div className="field">
+                <label>Location Context</label>
+                <select value={locationType} onChange={e => setLocationType(e.target.value)}>
+                  <option value="Outside">Outside / Street / Home</option>
+                  <option value="Building">Inside a Hospital / Building</option>
+                </select>
               </div>
+              <p className="caption">Where known, please provide your on-site location so that the attending clinician can reach you without delay.</p>
+              {locationType === 'Building' ? (
+                <div className="split">
+                  <div className="field"><label>Floor</label><input type="text" placeholder="Third floor" value={floor} onChange={e => setFloor(e.target.value)} /></div>
+                  <div className="field"><label>Room</label><input type="text" placeholder="Room 312" value={room} onChange={e => setRoom(e.target.value)} /></div>
+                </div>
+              ) : (
+                <div className="field">
+                  <label>Landmark / Address</label>
+                  <input type="text" placeholder="e.g., Near Central Park entrance" value={landmark} onChange={e => setLandmark(e.target.value)} />
+                </div>
+              )}
             </div>
             <button className="btn red" type="button" onClick={handleEmergencySubmit} disabled={loading}>
               {loading ? 'Transmitting...' : 'Submit emergency request'} <span aria-hidden="true">→</span>

@@ -17,7 +17,7 @@ function getDistance(lat1, lon1, lat2, lon2) {
 }
 
 exports.triggerAlert = async (req, res) => {
-    const { patientId, latitude, longitude, requiredSpecialization, floor, roomNumber, bedNumber } = req.body;
+    const { patientId, latitude, longitude, requiredSpecialization, floor, roomNumber, bedNumber, locationType, landmark } = req.body;
 
     const lat = parseFloat(latitude);
     const lng = parseFloat(longitude);
@@ -81,6 +81,15 @@ exports.triggerAlert = async (req, res) => {
              return res.status(400).json({ success: false, message: "Patient profile not found. Please log in." });
         }
 
+        let alertDescription = '';
+        if (locationType === 'Building') {
+            alertDescription = `Building - Floor: ${floor || 'N/A'}, Room: ${roomNumber || 'N/A'}, Bed: ${bedNumber || 'N/A'}`;
+        } else if (locationType === 'Outside') {
+            alertDescription = `Outside/Home - Landmark: ${landmark || 'N/A'}`;
+        } else {
+            alertDescription = `Floor ${floor || 'N/A'}, Room ${roomNumber || 'N/A'}, Bed ${bedNumber || 'N/A'}`; // Fallback for old apps
+        }
+
         // Create the EmergencyAlert and DispatchRecord
         const newAlert = await prisma.emergencyAlert.create({
             data: {
@@ -88,7 +97,7 @@ exports.triggerAlert = async (req, res) => {
                 latitude: lat,
                 longitude: lng,
                 status: 'PENDING',
-                description: `Floor ${floor || 'N/A'}, Room ${roomNumber || 'N/A'}, Bed ${bedNumber || 'N/A'}`
+                description: alertDescription
             }
         });
 
