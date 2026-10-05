@@ -325,7 +325,7 @@ export default function Dashboard() {
         </div>
 
         {activeAlertId && activeAlertDetails ? (
-          <div style={{ padding: '20px', border: '2px solid var(--primary)', borderRadius: '12px', backgroundColor: '#f0fdf4' }}>
+          <div style={{ padding: '20px', border: '2px solid var(--primary)', borderRadius: '12px', backgroundColor: '#f0fdf4', color: '#0f2a31' }}>
             <h3 style={{ color: 'var(--primary)', margin: '0 0 15px 0' }}>Dispatched Clinician En Route</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
               <div><strong>Physician:</strong><br/>{activeAlertDetails.doctorname}</div>
@@ -334,13 +334,13 @@ export default function Dashboard() {
               <div><strong>Distance:</strong><br/>{activeAlertDetails.distanceFormatted} away</div>
             </div>
             
-            <div style={{ marginTop: '20px', padding: '15px', borderRadius: '8px', backgroundColor: activeAlertDetails.status === 'PENDING' ? '#fff3cd' : '#d4edda' }}>
+            <div style={{ marginTop: '20px', padding: '15px', borderRadius: '8px', backgroundColor: activeAlertDetails.status === 'PENDING' ? '#fff3cd' : '#d4edda', color: '#0f2a31' }}>
               <strong>Status: </strong>
               {activeAlertDetails.status === 'PENDING' 
                 ? 'Physician has been dispatched. Waiting for them to acknowledge the alert...' 
                 : '✅ Physician has acknowledged the alert and is actively en route to your location!'}
             </div>
-            <button className="btn plain" style={{marginTop: '20px', width: '100%', textAlign: 'center'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Cancel or submit new request</button>
+            <button className="btn plain" style={{marginTop: '20px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Cancel or submit new request</button>
           </div>
         ) : (
           <>
