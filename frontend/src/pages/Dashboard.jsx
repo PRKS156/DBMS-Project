@@ -214,14 +214,14 @@ export default function Dashboard() {
             <h2>System Analytics</h2>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginTop: '1rem' }}>
               <div style={{ border: '1px solid #ddd', padding: '1rem', borderRadius: '8px' }}>
-                <h3>Emergencies by Area</h3>
+                <h3>Outdoor Emergencies by Area</h3>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={adminAnalytics.areaCases} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <BarChart data={adminAnalytics.areaCases} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type="number" />
-                    <YAxis dataKey="name" type="category" width={100} />
+                    <YAxis dataKey="name" type="category" width={180} tick={{fontSize: 12}} />
                     <Tooltip />
-                    <Bar dataKey="cases" fill="var(--primary)" />
+                    <Bar dataKey="cases" fill="#0088FE" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
