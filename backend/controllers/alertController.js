@@ -81,13 +81,15 @@ exports.triggerAlert = async (req, res) => {
              return res.status(400).json({ success: false, message: "Patient profile not found. Please log in." });
         }
 
+        const typePrefix = requiredSpecialization || 'Unknown';
+        
         let alertDescription = '';
         if (locationType === 'Building') {
-            alertDescription = `Building - Floor: ${floor || 'N/A'}, Room: ${roomNumber || 'N/A'}, Bed: ${bedNumber || 'N/A'}`;
+            alertDescription = `${typePrefix} | Building/Hospital: ${landmark || 'N/A'}, Floor: ${floor || 'N/A'}, Room: ${roomNumber || 'N/A'}`;
         } else if (locationType === 'Outside') {
-            alertDescription = `Outside/Home - Landmark: ${landmark || 'N/A'}`;
+            alertDescription = `${typePrefix} | Outside/Home - Landmark: ${landmark || 'N/A'}`;
         } else {
-            alertDescription = `Floor ${floor || 'N/A'}, Room ${roomNumber || 'N/A'}, Bed ${bedNumber || 'N/A'}`; // Fallback for old apps
+            alertDescription = `${typePrefix} | Floor ${floor || 'N/A'}, Room ${roomNumber || 'N/A'}`; // Fallback for old apps
         }
 
         // Create the EmergencyAlert and DispatchRecord

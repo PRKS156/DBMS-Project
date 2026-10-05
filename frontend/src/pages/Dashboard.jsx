@@ -379,7 +379,7 @@ export default function Dashboard() {
               locationType,
               floor: locationType === 'Building' ? floor : undefined,
               roomNumber: locationType === 'Building' ? room : undefined,
-              landmark: locationType === 'Outside' ? landmark : undefined
+              landmark: landmark
             })
           });
           const data = await res.json();
@@ -467,10 +467,16 @@ export default function Dashboard() {
               </div>
               <p className="caption">Please give us exact details so the doctor can find you quickly.</p>
               {locationType === 'Building' ? (
-                <div className="split">
-                  <div className="field"><label>Floor</label><input type="text" placeholder="Third floor" value={floor} onChange={e => setFloor(e.target.value)} /></div>
-                  <div className="field"><label>Room</label><input type="text" placeholder="Room 312" value={room} onChange={e => setRoom(e.target.value)} /></div>
-                </div>
+                <>
+                  <div className="field">
+                    <label>Building / Hospital Name</label>
+                    <input type="text" placeholder="e.g., City General Hospital" value={landmark} onChange={e => setLandmark(e.target.value)} />
+                  </div>
+                  <div className="split">
+                    <div className="field"><label>Floor</label><input type="text" placeholder="Third floor" value={floor} onChange={e => setFloor(e.target.value)} /></div>
+                    <div className="field"><label>Room</label><input type="text" placeholder="Room 312" value={room} onChange={e => setRoom(e.target.value)} /></div>
+                  </div>
+                </>
               ) : (
                 <div className="field">
                   <label>Landmark / Address</label>
