@@ -257,7 +257,7 @@ export default function Dashboard() {
               </div>
             )}
             
-            <button className="btn navy" type="button" onClick={() => handleDutyToggle(false)}>Conclude on-duty session</button>
+            <button className="btn navy" type="button" onClick={() => handleDutyToggle(false)}>Go off duty</button>
           </>
         )}
         
@@ -319,52 +319,52 @@ export default function Dashboard() {
     return (
       <section className="screen active card">
         <div className="heading">
-          <span className="eyebrow">Emergency request</span>
-          <h1>Assistance is one request away.</h1>
-          <p className="sub">Welcome back. Please confirm the nature of the emergency and your on-site location.</p>
+          <span className="eyebrow">Need Help?</span>
+          <h1>Get help right now.</h1>
+          <p className="sub">Tell us what's wrong and where you are, and we'll send a doctor immediately.</p>
         </div>
 
         {activeAlertId && activeAlertDetails ? (
           <div style={{ padding: '20px', border: '2px solid var(--primary)', borderRadius: '12px', backgroundColor: '#f0fdf4', color: '#0f2a31' }}>
-            <h3 style={{ color: 'var(--primary)', margin: '0 0 15px 0' }}>Dispatched Clinician En Route</h3>
+            <h3 style={{ color: 'var(--primary)', margin: '0 0 15px 0' }}>Doctor is on the way</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div><strong>Physician:</strong><br/>{activeAlertDetails.doctorname}</div>
-              <div><strong>Specialization:</strong><br/>{activeAlertDetails.specialization}</div>
-              <div><strong>Contact:</strong><br/>{activeAlertDetails.doctorphone}</div>
+              <div><strong>Doctor:</strong><br/>{activeAlertDetails.doctorname}</div>
+              <div><strong>Specialty:</strong><br/>{activeAlertDetails.specialization}</div>
+              <div><strong>Phone:</strong><br/>{activeAlertDetails.doctorphone}</div>
               <div><strong>Distance:</strong><br/>{activeAlertDetails.distanceFormatted} away</div>
             </div>
             
             <div style={{ marginTop: '20px', padding: '15px', borderRadius: '8px', backgroundColor: activeAlertDetails.status === 'PENDING' ? '#fff3cd' : '#d4edda', color: '#0f2a31' }}>
               <strong>Status: </strong>
               {activeAlertDetails.status === 'PENDING' 
-                ? 'Physician has been dispatched. Waiting for them to acknowledge the alert...' 
-                : '✅ Physician has acknowledged the alert and is actively en route to your location!'}
+                ? 'We have found a doctor. Waiting for them to confirm...' 
+                : '✅ The doctor has confirmed and is heading to your location right now!'}
             </div>
-            <button className="btn plain" style={{marginTop: '20px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Cancel or submit new request</button>
+            <button className="btn plain" style={{marginTop: '20px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Cancel or start over</button>
           </div>
         ) : (
           <>
             <div className="form">
               <div className="field">
-                <label>Nature of the emergency</label>
+                <label>What kind of emergency is it?</label>
                 <select value={emergencyType} onChange={e => setEmergencyType(e.target.value)}>
-                  <optgroup label="Common presentations">
-                    <option value="Cardiology">Cardiac emergency</option>
+                  <optgroup label="Common emergencies">
+                    <option value="Cardiology">Heart / Chest Pain</option>
                     <option value="Trauma Surgery">Severe injury or accident</option>
-                    <option value="Pediatrics">Pediatric emergency</option>
+                    <option value="Pediatrics">Child emergency</option>
                     <option value="Orthopedics">Bone or joint injury</option>
                   </optgroup>
-                  <option value="Unsure / General">Uncertain — please assess</option>
+                  <option value="Unsure / General">I'm not sure / General emergency</option>
                 </select>
               </div>
               <div className="field">
-                <label>Location Context</label>
+                <label>Where are you?</label>
                 <select value={locationType} onChange={e => setLocationType(e.target.value)}>
                   <option value="Outside">Outside / Street / Home</option>
                   <option value="Building">Inside a Hospital / Building</option>
                 </select>
               </div>
-              <p className="caption">Where known, please provide your on-site location so that the attending clinician can reach you without delay.</p>
+              <p className="caption">Please give us exact details so the doctor can find you quickly.</p>
               {locationType === 'Building' ? (
                 <div className="split">
                   <div className="field"><label>Floor</label><input type="text" placeholder="Third floor" value={floor} onChange={e => setFloor(e.target.value)} /></div>
@@ -378,7 +378,7 @@ export default function Dashboard() {
               )}
             </div>
             <button className="btn red" type="button" onClick={handleEmergencySubmit} disabled={loading}>
-              {loading ? 'Transmitting...' : 'Submit emergency request'} <span aria-hidden="true">→</span>
+              {loading ? 'Sending...' : 'Send for help now'} <span aria-hidden="true">→</span>
             </button>
             {error && <div className="result error" style={{display:'block', marginTop: '15px'}}>{error}</div>}
             {success && <div className="result success" style={{display:'block', marginTop: '15px'}}>{success}</div>}
