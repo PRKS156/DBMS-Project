@@ -76,9 +76,24 @@ exports.triggerAlert = async (req, res) => {
             if (profile) patientProfileId = profile.id;
         }
 
-        // If no patient profile found, we might need a default or error
+        // If no patient profile found (e.g., Guest / Bystander SOS)
         if (!patientProfileId) {
-             return res.status(400).json({ success: false, message: "Patient profile not found. Please log in." });
+             const guestUser = await prisma.user.create({
+                 data: {
+                     email: `guest_${Date.now()}@medrelay.com`,
+                     password: 'guestpassword',
+                     role: 'PATIENT',
+                     patientProfile: {
+                         create: {
+                             fullName: 'Anonymous Bystander',
+                             phoneNumber: 'N/A',
+                             medicalHistory: 'Unknown (Guest SOS)',
+                         }
+                     }
+                 },
+                 include: { patientProfile: true }
+             });
+             patientProfileId = guestUser.patientProfile.id;
         }
 
         const typePrefix = requiredSpecialization || 'Unknown';
