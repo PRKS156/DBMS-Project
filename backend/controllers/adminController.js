@@ -91,16 +91,24 @@ exports.getAnalytics = async (req, res) => {
             }
 
             if (d.alert && d.alert.description) {
-                // description format: "Cardiology | Landmark: Central Park"
-                const parts = d.alert.description.split(' | ');
-                const type = parts[0]?.trim() || 'Unknown';
-                const area = parts.length > 1 ? parts.slice(1).join(' ').trim() : 'Unknown Area';
+                let type, area;
+                if (d.alert.description.includes(' | ')) {
+                    const parts = d.alert.description.split(' | ');
+                    type = parts[0]?.trim();
+                    area = parts.slice(1).join(' ').trim();
+                } else {
+                    // Legacy data fallback
+                    type = 'Legacy / Unspecified';
+                    area = d.alert.description;
+                }
 
                 emergencyTypes[type] = (emergencyTypes[type] || 0) + 1;
                 
-                // Group by general area keywords if possible, else use raw
-                let areaKey = area.includes('Landmark:') ? area.split('Landmark:')[1].trim() : 'Building/Hospital';
-                areaCases[areaKey] = (areaCases[areaKey] || 0) + 1;
+                // User requested: "only the outdoor locations not indoor" for the area chart
+                if (area.includes('Landmark:')) {
+                    let areaKey = area.split('Landmark:')[1].trim();
+                    areaCases[areaKey] = (areaCases[areaKey] || 0) + 1;
+                }
             }
         });
 
