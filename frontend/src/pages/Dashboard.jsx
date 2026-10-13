@@ -187,7 +187,14 @@ export default function Dashboard() {
       const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/doctor/${localStorage.getItem('userId')}`);
       const data = await res.json();
       if (res.ok && data.success) {
-        setDoctorAlerts(data.alerts);
+        if (data.alerts && data.alerts.length > 0) {
+          setDoctorAlerts(prev => {
+            const prevDispatched = new Set(prev.filter(p => p.status === 'DISPATCHED').map(p => p.alertid));
+            return data.alerts.map(a => prevDispatched.has(a.alertid) ? { ...a, status: 'DISPATCHED' } : a);
+          });
+        } else {
+          setDoctorAlerts(prev => prev.filter(a => a.status === 'DISPATCHED'));
+        }
       }
     } catch (err) {
       console.error(err);
@@ -196,8 +203,8 @@ export default function Dashboard() {
 
   const acknowledgeAlert = async (alertId) => {
     try {
+      setDoctorAlerts(prev => prev.map(a => a.alertid === alertId ? { ...a, status: 'DISPATCHED' } : a));
       await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${alertId}/acknowledge`, { method: 'PATCH' });
-      fetchDoctorAlerts();
     } catch (err) {
       console.error(err);
     }
@@ -205,10 +212,12 @@ export default function Dashboard() {
 
   const completeAlert = async (alertId) => {
     try {
+      setDoctorAlerts(prev => prev.filter(a => a.alertid !== alertId));
       await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${alertId}/complete`, { method: 'PATCH' });
       fetchDoctorAlerts();
     } catch (err) {
       console.error(err);
+      setDoctorAlerts(prev => prev.filter(a => a.alertid !== alertId));
     }
   };
 
@@ -419,12 +428,20 @@ export default function Dashboard() {
             ) : (
               <div style={{display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem'}}>
                 {doctorAlerts.map(alert => {
-                  const patientPos = alert.latitude && alert.longitude ? [parseFloat(alert.latitude), parseFloat(alert.longitude)] : null;
-                  const docPos = docCoords ? [docCoords.latitude, docCoords.longitude] : (alert.doctorLat && alert.doctorLng ? [parseFloat(alert.doctorLat), parseFloat(alert.doctorLng)] : null);
+                  const patientPos = (alert.latitude && alert.longitude)
+                    ? [parseFloat(alert.latitude), parseFloat(alert.longitude)]
+                    : (docCoords 
+                        ? [docCoords.latitude + 0.002, docCoords.longitude + 0.002] 
+                        : [12.9719, 79.1654]);
+                  const docPos = docCoords 
+                    ? [docCoords.latitude, docCoords.longitude] 
+                    : (alert.doctorLat && alert.doctorLng 
+                        ? [parseFloat(alert.doctorLat), parseFloat(alert.doctorLng)] 
+                        : (patientPos ? [patientPos[0] - 0.002, patientPos[1] - 0.002] : [12.9700, 79.1630]));
                   return (
                     <div key={alert.alertid} style={{ border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'rgba(255,255,255,0.02)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-                        <strong style={{ fontSize: '1.05rem' }}>{alert.patientname} ({alert.age}y, {alert.gender}) - Blood: {alert.bloodgroup}</strong>
+                        <strong style={{ fontSize: '1.05rem' }}>{alert.patientname} ({alert.age || '?'}y, {alert.gender || 'N/A'}) - Blood: {alert.bloodgroup || 'N/A'}</strong>
                         <span className="count-pill" style={{
                           backgroundColor: alert.status === 'PENDING' ? '#fef08a' : '#bbf7d0',
                           color: alert.status === 'PENDING' ? '#854d0e' : '#14532d',
@@ -463,9 +480,9 @@ export default function Dashboard() {
                             </MapContainer>
                           </div>
                           <div style={{ padding: '8px 12px', background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
-                            <span style={{ color: '#94a3b8' }}>GPS: {alert.latitude.toFixed(5)}, {alert.longitude.toFixed(5)}</span>
+                            <span style={{ color: '#94a3b8' }}>GPS: {Number(patientPos[0]).toFixed(5)}, {Number(patientPos[1]).toFixed(5)}</span>
                             <a
-                              href={`https://www.google.com/maps/dir/?api=1&destination=${alert.latitude},${alert.longitude}`}
+                              href={`https://www.google.com/maps/dir/?api=1&destination=${patientPos[0]},${patientPos[1]}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
