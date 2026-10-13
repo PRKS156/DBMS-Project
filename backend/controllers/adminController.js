@@ -52,20 +52,120 @@ exports.getAllData = async (req, res) => {
 
 exports.deleteDoctor = async (req, res) => {
     const { id } = req.params;
+    const targetId = parseInt(id);
+    if (isNaN(targetId)) {
+        return res.status(400).json({ success: false, message: "Invalid doctor ID." });
+    }
+
     try {
-        await prisma.user.delete({ where: { id: parseInt(id) } });
-        return res.status(200).json({ success: true, message: "Doctor deleted." });
+        let docProfile = await prisma.doctorProfile.findFirst({
+            where: { OR: [{ userId: targetId }, { id: targetId }] }
+        });
+
+        const userId = docProfile ? docProfile.userId : targetId;
+        const docId = docProfile ? docProfile.id : null;
+
+        if (docId) {
+            // Nullify doctor reference in dispatch records so history remains consistent
+            await prisma.dispatchRecord.updateMany({
+                where: { doctorId: docId },
+                data: { doctorId: null }
+            });
+        }
+
+        // Remove any feedbacks submitted by this user
+        await prisma.feedback.deleteMany({
+            where: { userId }
+        });
+
+        // Delete doctor profile if exists
+        if (docProfile) {
+            await prisma.doctorProfile.deleteMany({
+                where: { id: docProfile.id }
+            });
+        }
+
+        // Delete user account
+        await prisma.user.deleteMany({
+            where: { id: userId }
+        });
+
+        return res.status(200).json({ success: true, message: "Doctor deleted successfully." });
     } catch (error) {
+        console.error("❌ Delete doctor failed:", error);
         return res.status(500).json({ success: false, message: "Delete failed.", debug: error.message });
     }
 };
 
 exports.deletePatient = async (req, res) => {
     const { id } = req.params;
+    const targetId = parseInt(id);
+    if (isNaN(targetId)) {
+        return res.status(400).json({ success: false, message: "Invalid patient ID." });
+    }
+
     try {
-        await prisma.user.delete({ where: { id: parseInt(id) } });
-        return res.status(200).json({ success: true, message: "Patient deleted." });
+        let patProfile = await prisma.patientProfile.findFirst({
+            where: { OR: [{ userId: targetId }, { id: targetId }] }
+        });
+
+        const userId = patProfile ? patProfile.userId : targetId;
+        const patId = patProfile ? patProfile.id : null;
+
+        if (patId) {
+            // Find all emergency alerts for this patient
+            const alerts = await prisma.emergencyAlert.findMany({
+                where: { patientId: patId },
+                select: { id: true }
+            });
+            const alertIds = alerts.map(a => a.id);
+
+            if (alertIds.length > 0) {
+                // Find associated dispatch records
+                const dispatches = await prisma.dispatchRecord.findMany({
+                    where: { alertId: { in: alertIds } },
+                    select: { id: true }
+                });
+                const dispatchIds = dispatches.map(d => d.id);
+
+                if (dispatchIds.length > 0) {
+                    // Delete feedbacks associated with these dispatches
+                    await prisma.feedback.deleteMany({
+                        where: { dispatchRecordId: { in: dispatchIds } }
+                    });
+                    // Delete dispatch records
+                    await prisma.dispatchRecord.deleteMany({
+                        where: { id: { in: dispatchIds } }
+                    });
+                }
+
+                // Delete the alerts
+                await prisma.emergencyAlert.deleteMany({
+                    where: { id: { in: alertIds } }
+                });
+            }
+        }
+
+        // Delete feedbacks submitted by this user
+        await prisma.feedback.deleteMany({
+            where: { userId }
+        });
+
+        // Delete patient profile
+        if (patProfile) {
+            await prisma.patientProfile.deleteMany({
+                where: { id: patProfile.id }
+            });
+        }
+
+        // Delete user account
+        await prisma.user.deleteMany({
+            where: { id: userId }
+        });
+
+        return res.status(200).json({ success: true, message: "Patient deleted successfully." });
     } catch (error) {
+        console.error("❌ Delete patient failed:", error);
         return res.status(500).json({ success: false, message: "Delete failed.", debug: error.message });
     }
 };

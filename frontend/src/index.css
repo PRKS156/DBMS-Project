@@ -298,3 +298,310 @@ tbody tr:hover{background:#f7fbfa}
   .chip{font-size:0;padding:8px}
   .chip .dot{margin:0}
 }
+
+/* ═══════════════════════════════════════════════════════════
+   AMBULANCE TRACKING PAGE
+   ═══════════════════════════════════════════════════════════ */
+
+/* Full-screen layout */
+.track-page {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: #0a1214;
+}
+
+/* Map fills all available space */
+.track-map-container {
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+.track-map-container .leaflet-container {
+  height: 100% !important;
+  width: 100% !important;
+  background: #0a1214;
+}
+
+/* Loading state */
+.map-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #5ce0d5;
+  gap: 16px;
+}
+.map-loading p { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .03em; }
+.map-loading-spinner {
+  width: 36px; height: 36px;
+  border: 3px solid rgba(92, 224, 213, .2);
+  border-top-color: #5ce0d5;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
+/* ─── Custom map markers ─── */
+.marker-pin {
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  box-shadow: 0 4px 20px rgba(0,0,0,.35);
+  transition: transform .3s ease;
+}
+.marker-pin:hover { transform: scale(1.12); }
+
+.patient-pin {
+  background: linear-gradient(135deg, #c74a42, #e06058);
+  border: 2px solid rgba(255,255,255,.3);
+}
+.doctor-pin {
+  background: linear-gradient(135deg, #0c8a7a, #10b39e);
+  border: 2px solid rgba(255,255,255,.3);
+}
+
+.marker-pulse {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  animation: markerPulse 2s ease-out infinite;
+}
+.patient-pulse { background: rgba(199, 74, 66, .35); }
+.doctor-pulse  { background: rgba(12, 138, 122, .35); }
+
+@keyframes markerPulse {
+  0%   { width: 44px; height: 44px; opacity: .6; }
+  100% { width: 90px; height: 90px; opacity: 0; }
+}
+
+/* Fix Leaflet div icon styling */
+.custom-marker-patient,
+.custom-marker-doctor {
+  background: transparent !important;
+  border: none !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Custom popup */
+.custom-popup .leaflet-popup-content-wrapper {
+  background: rgba(20, 31, 34, .92);
+  backdrop-filter: blur(10px);
+  color: #eef2f1;
+  border-radius: 12px;
+  border: 1px solid rgba(92, 224, 213, .2);
+  box-shadow: 0 10px 30px rgba(0,0,0,.4);
+  padding: 4px 0;
+}
+.custom-popup .leaflet-popup-content { margin: 10px 14px; font-size: 12px; line-height: 1.6; }
+.custom-popup .leaflet-popup-tip { background: rgba(20, 31, 34, .92); }
+
+/* ─── Bottom overlay panel ─── */
+.track-overlay {
+  position: relative;
+  z-index: 10;
+  padding: 22px 22px 28px;
+  background: rgba(15, 22, 24, .92);
+  backdrop-filter: blur(20px) saturate(1.5);
+  border-top: 1px solid rgba(92, 224, 213, .15);
+  box-shadow: 0 -20px 60px rgba(0,0,0,.4);
+  animation: slideUp .5s cubic-bezier(.2,.7,.3,1) both;
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(40px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Status bar */
+.track-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  background: rgba(92, 224, 213, .08);
+  border: 1px solid rgba(92, 224, 213, .15);
+  border-radius: 10px;
+}
+.track-status-dot {
+  width: 10px; height: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+.track-status-dot.pending { background: #e0a641; box-shadow: 0 0 0 4px rgba(224, 150, 65, .2); }
+.track-status-dot.confirmed { background: #4ce595; box-shadow: 0 0 0 4px rgba(76, 229, 149, .2); }
+.track-status-text {
+  color: #c1dad6;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+/* Doctor card */
+.track-doctor-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+}
+.track-doctor-avatar {
+  width: 50px; height: 50px;
+  flex-shrink: 0;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, #0c8a7a, #10b39e);
+  border-radius: 14px;
+  color: #fff;
+}
+.track-doctor-info {
+  flex: 1;
+  min-width: 0;
+}
+.track-doctor-info h3 {
+  margin: 0;
+  color: #eef2f1;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.track-doctor-info span {
+  display: block;
+  margin-top: 3px;
+  color: #7b9992;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.track-call-btn {
+  width: 46px; height: 46px;
+  flex-shrink: 0;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, #1c6a45, #22996a);
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform .2s ease, box-shadow .2s ease;
+  box-shadow: 0 6px 18px rgba(34, 153, 106, .3);
+}
+.track-call-btn:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 8px 24px rgba(34, 153, 106, .45);
+}
+
+/* Metrics strip */
+.track-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.track-metric {
+  padding: 12px 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  text-align: center;
+}
+.track-metric-label {
+  display: block;
+  color: #6b8891;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.track-metric-value {
+  display: block;
+  color: #eef2f1;
+  font-family: var(--display, Georgia, serif);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+}
+.track-metric-value.accent {
+  color: #5ce0d5;
+}
+
+/* Reassurance messages */
+.track-reassurance {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: rgba(92, 224, 213, .06);
+  border-left: 3px solid rgba(92, 224, 213, .4);
+  border-radius: 0 8px 8px 0;
+  animation: fadeReassurance .6s ease both;
+}
+@keyframes fadeReassurance {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+.track-reassurance svg {
+  flex-shrink: 0;
+  color: #5ce0d5;
+  opacity: .7;
+}
+.track-reassurance span {
+  color: #aabfbb;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* Actions */
+.track-actions {
+  display: flex;
+  gap: 10px;
+}
+.track-back-btn {
+  flex: 1;
+  min-height: 46px !important;
+  margin-top: 0 !important;
+  font-size: 12.5px !important;
+}
+
+/* ─── Responsive ─── */
+@media (min-width: 768px) {
+  .track-overlay {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    width: 380px;
+    border-radius: 20px;
+    border: 1px solid rgba(92, 224, 213, .15);
+    padding: 20px;
+  }
+  .track-page {
+    position: fixed;
+  }
+  .track-map-container {
+    flex: 1;
+  }
+}
+
+@media (max-width: 400px) {
+  .track-metrics {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .track-metric { padding: 10px 8px; }
+  .track-metric-value { font-size: 15px; }
+  .track-overlay { padding: 16px 16px 22px; }
+}

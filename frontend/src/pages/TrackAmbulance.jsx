@@ -1,0 +1,333 @@
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { io } from 'socket.io-client';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+const API_BASE = 'https://emergency-backend-3ppk.onrender.com';
+
+/* ─── Custom map icons ─── */
+function createPatientIcon() {
+  return L.divIcon({
+    className: 'custom-marker-patient',
+    html: `<div class="marker-pin patient-pin">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/>
+      </svg>
+    </div>
+    <div class="marker-pulse patient-pulse"></div>`,
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
+    popupAnchor: [0, -28]
+  });
+}
+
+function createDoctorIcon() {
+  return L.divIcon({
+    className: 'custom-marker-doctor',
+    html: `<div class="marker-pin doctor-pin">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+    </div>
+    <div class="marker-pulse doctor-pulse"></div>`,
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
+    popupAnchor: [0, -28]
+  });
+}
+
+/* ─── Map auto-bounds ─── */
+function FitBounds({ patientPos, doctorPos }) {
+  const map = useMap();
+  useEffect(() => {
+    if (patientPos && doctorPos) {
+      const bounds = L.latLngBounds([patientPos, doctorPos]);
+      map.fitBounds(bounds, { padding: [80, 80], maxZoom: 16 });
+    } else if (patientPos) {
+      map.setView(patientPos, 15);
+    }
+  }, [patientPos, doctorPos, map]);
+  return null;
+}
+
+/* ─── ETA helpers ─── */
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatETA(meters) {
+  const avgSpeed = 40; // km/h for urban ambulance
+  const minutes = (meters / 1000 / avgSpeed) * 60;
+  if (minutes < 1) return 'Less than 1 min';
+  if (minutes < 60) return `~${Math.ceil(minutes)} min`;
+  return `~${Math.floor(minutes / 60)}h ${Math.round(minutes % 60)}m`;
+}
+
+function formatDistance(meters) {
+  if (meters > 1000) return `${(meters / 1000).toFixed(1)} km`;
+  return `${Math.round(meters)} m`;
+}
+
+/* ─── Reassurance messages ─── */
+const REASSURANCE_MESSAGES = [
+  "Stay calm. Help is on the way to your location.",
+  "A medical professional is heading towards you right now.",
+  "You're not alone. Assistance will arrive shortly.",
+  "Try to stay still and keep breathing slowly.",
+  "The doctor can see your location and is moving towards you."
+];
+
+export default function TrackAmbulance() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const alertId = searchParams.get('alertId');
+  const [alertDetails, setAlertDetails] = useState(null);
+  const [doctorLoc, setDoctorLoc] = useState(null);
+  const [error, setError] = useState('');
+  const [msgIndex, setMsgIndex] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const socketRef = useRef(null);
+  const startTimeRef = useRef(Date.now());
+
+  // Rotate reassurance messages
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMsgIndex((prev) => (prev + 1) % REASSURANCE_MESSAGES.length);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Elapsed timer
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Socket.io connection
+  useEffect(() => {
+    if (!alertId) return;
+
+    socketRef.current = io(API_BASE);
+    socketRef.current.emit('joinAlertRoom', alertId);
+
+    socketRef.current.on('alertUpdate', (data) => {
+      if (data.status === 'DISPATCHED') {
+        setAlertDetails((prev) => (prev ? { ...prev, status: 'DISPATCHED' } : prev));
+      }
+    });
+
+    socketRef.current.on('doctorLocation', (loc) => {
+      setDoctorLoc({ latitude: parseFloat(loc.latitude), longitude: parseFloat(loc.longitude) });
+    });
+
+    return () => {
+      if (socketRef.current) socketRef.current.disconnect();
+    };
+  }, [alertId]);
+
+  // Poll alert status
+  useEffect(() => {
+    if (!alertId) return;
+
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/alerts/${alertId}/status`);
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setAlertDetails(data.alert);
+          if (data.alert.doctorLat && data.alert.doctorLng) {
+            setDoctorLoc({ latitude: data.alert.doctorLat, longitude: data.alert.doctorLng });
+          }
+          if (data.alert.doctorId && socketRef.current) {
+            socketRef.current.on(`doctorLocation_${data.alert.doctorId}`, (loc) => {
+              setDoctorLoc({ latitude: parseFloat(loc.latitude), longitude: parseFloat(loc.longitude) });
+            });
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, [alertId]);
+
+  const patientIcon = useMemo(() => createPatientIcon(), []);
+  const doctorIcon = useMemo(() => createDoctorIcon(), []);
+
+  if (!alertId) {
+    return (
+      <section className="card" style={{ textAlign: 'center' }}>
+        <div className="heading">
+          <span className="eyebrow">Tracking</span>
+          <h1>No active emergency.</h1>
+          <p className="sub">You need an active emergency alert to track the ambulance.</p>
+        </div>
+        <button className="btn teal" onClick={() => navigate('/patient-dashboard')}>
+          Go to Dashboard <span aria-hidden="true">→</span>
+        </button>
+      </section>
+    );
+  }
+
+  const patientPos = alertDetails?.latitude && alertDetails?.longitude
+    ? [alertDetails.latitude, alertDetails.longitude]
+    : null;
+  const doctorPos = doctorLoc
+    ? [doctorLoc.latitude, doctorLoc.longitude]
+    : null;
+
+  const distance = patientPos && doctorPos
+    ? getDistance(patientPos[0], patientPos[1], doctorPos[0], doctorPos[1])
+    : null;
+
+  const elapsedMin = Math.floor(elapsed / 60);
+  const elapsedSec = elapsed % 60;
+
+  return (
+    <div className="track-page">
+      {/* ─── Map ─── */}
+      <div className="track-map-container">
+        {patientPos ? (
+          <MapContainer
+            center={patientPos}
+            zoom={15}
+            style={{ height: '100%', width: '100%' }}
+            zoomControl={false}
+          >
+            <TileLayer
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+            />
+            <FitBounds patientPos={patientPos} doctorPos={doctorPos} />
+
+            {/* Patient marker */}
+            <Marker position={patientPos} icon={patientIcon}>
+              <Popup className="custom-popup">
+                <strong>📍 Your Location</strong>
+                <br />
+                <span style={{ fontSize: '11px', color: '#6b8891' }}>
+                  {patientPos[0].toFixed(5)}, {patientPos[1].toFixed(5)}
+                </span>
+              </Popup>
+            </Marker>
+
+            {/* Doctor marker */}
+            {doctorPos && (
+              <Marker position={doctorPos} icon={doctorIcon}>
+                <Popup className="custom-popup">
+                  <strong>🚑 {alertDetails?.doctorname || 'Doctor'}</strong>
+                  <br />
+                  <span style={{ fontSize: '11px', color: '#6b8891' }}>
+                    {distance ? `${formatDistance(distance)} away` : 'En route'}
+                  </span>
+                </Popup>
+              </Marker>
+            )}
+
+            {/* Route polyline */}
+            {patientPos && doctorPos && (
+              <Polyline
+                positions={[doctorPos, patientPos]}
+                pathOptions={{
+                  color: '#5ce0d5',
+                  weight: 4,
+                  opacity: 0.8,
+                  dashArray: '12 8',
+                  lineCap: 'round'
+                }}
+              />
+            )}
+          </MapContainer>
+        ) : (
+          <div className="map-loading">
+            <div className="map-loading-spinner"></div>
+            <p>Locating your position...</p>
+          </div>
+        )}
+      </div>
+
+      {/* ─── Bottom overlay panel ─── */}
+      <div className="track-overlay">
+        {/* Status indicator */}
+        <div className="track-status-bar">
+          <div className={`track-status-dot ${alertDetails?.status === 'DISPATCHED' ? 'confirmed' : 'pending'}`}></div>
+          <span className="track-status-text">
+            {alertDetails?.status === 'DISPATCHED'
+              ? 'Doctor confirmed — heading to you now'
+              : 'Finding nearest doctor...'}
+          </span>
+        </div>
+
+        {/* Doctor info card */}
+        {alertDetails && (
+          <div className="track-doctor-card">
+            <div className="track-doctor-avatar">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+            </div>
+            <div className="track-doctor-info">
+              <h3>{alertDetails.doctorname}</h3>
+              <span>{alertDetails.specialization}</span>
+            </div>
+            <a href={`tel:${alertDetails.doctorphone}`} className="track-call-btn" title="Call doctor">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+              </svg>
+            </a>
+          </div>
+        )}
+
+        {/* Live metrics */}
+        <div className="track-metrics">
+          {distance !== null && (
+            <div className="track-metric">
+              <span className="track-metric-label">Distance</span>
+              <strong className="track-metric-value">{formatDistance(distance)}</strong>
+            </div>
+          )}
+          {distance !== null && (
+            <div className="track-metric">
+              <span className="track-metric-label">Est. Arrival</span>
+              <strong className="track-metric-value accent">{formatETA(distance)}</strong>
+            </div>
+          )}
+          <div className="track-metric">
+            <span className="track-metric-label">Elapsed</span>
+            <strong className="track-metric-value">{elapsedMin}:{String(elapsedSec).padStart(2, '0')}</strong>
+          </div>
+        </div>
+
+        {/* Reassurance */}
+        <div className="track-reassurance" key={msgIndex}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+          </svg>
+          <span>{REASSURANCE_MESSAGES[msgIndex]}</span>
+        </div>
+
+        {/* Actions */}
+        <div className="track-actions">
+          <button className="btn navy track-back-btn" onClick={() => navigate('/patient-dashboard')}>
+            ← Back to Dashboard
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

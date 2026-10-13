@@ -26,6 +26,11 @@ export default function PatientAccess() {
       });
       const data = await res.json();
       if (res.ok) {
+        if (data.role !== 'PATIENT') {
+          setError('This account is not registered as a patient. Please use the correct access portal.');
+          return;
+        }
+        localStorage.clear();
         localStorage.setItem('token', data.token);
         localStorage.setItem('role', data.role);
         localStorage.setItem('name', data.name || email);

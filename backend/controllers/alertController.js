@@ -182,7 +182,12 @@ exports.getAlertStatus = async (req, res) => {
                 doctorname: dispatch.doctor ? dispatch.doctor.fullName : 'N/A',
                 doctorphone: dispatch.doctor ? dispatch.doctor.phoneNumber : 'N/A',
                 specialization: dispatch.doctor ? dispatch.doctor.specialization : 'N/A',
-                distanceFormatted
+                distanceFormatted,
+                latitude: dispatch.alert.latitude,
+                longitude: dispatch.alert.longitude,
+                doctorLat: dispatch.doctor ? dispatch.doctor.currentLat : null,
+                doctorLng: dispatch.doctor ? dispatch.doctor.currentLng : null,
+                doctorId: dispatch.doctor ? dispatch.doctor.userId : null
             }
         });
     } catch (error) {

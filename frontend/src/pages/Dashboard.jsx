@@ -158,11 +158,26 @@ export default function Dashboard() {
   };
 
   const deleteAdminRecord = async (type, id) => {
+    const label = type === 'doctors' ? 'doctor' : 'patient';
+    if (!window.confirm(`Are you sure you want to remove this ${label}?`)) {
+      return;
+    }
     try {
-      await fetch(`https://emergency-backend-3ppk.onrender.com/api/admin/${type}/${id}`, { method: 'DELETE' });
-      fetchAdminStats();
+      const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/admin/${type}/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (type === 'patients') {
+          setPatientsList(prev => prev.filter(p => p.userId !== id && p.id !== id));
+        } else if (type === 'doctors') {
+          setDoctorsList(prev => prev.filter(d => d.userId !== id && d.id !== id));
+        }
+        fetchAdminStats();
+      } else {
+        alert(data.message || `Failed to remove ${label}: ${data.debug || 'Unknown error'}`);
+      }
     } catch (err) {
       console.error(err);
+      alert(`Network error while removing ${label}.`);
     }
   };
 
@@ -441,7 +456,10 @@ export default function Dashboard() {
                 ? 'We have found a doctor. Waiting for them to confirm...' 
                 : '✅ The doctor has confirmed and is heading to your location right now!'}
             </div>
-            <button className="btn plain" style={{marginTop: '20px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Cancel or start over</button>
+            <button className="btn teal" style={{marginTop: '16px', width: '100%'}} onClick={() => navigate(`/track-ambulance?alertId=${activeAlertId}`)}>
+              <span aria-hidden="true">📍</span> Track Doctor on Map
+            </button>
+            <button className="btn plain" style={{marginTop: '10px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Cancel or start over</button>
           </div>
         ) : (
           <>

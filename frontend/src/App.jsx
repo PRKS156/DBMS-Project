@@ -5,6 +5,7 @@ import PatientAccess from './pages/PatientAccess';
 import DoctorAccess from './pages/DoctorAccess';
 import AdminAccess from './pages/AdminAccess';
 import Dashboard from './pages/Dashboard';
+import TrackAmbulance from './pages/TrackAmbulance';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/patient-dashboard" element={<Dashboard />} />
           <Route path="/doctor-dashboard" element={<Dashboard />} />
           <Route path="/admin-dashboard" element={<Dashboard />} />
+          <Route path="/track-ambulance" element={<TrackAmbulance />} />
         </Route>
       </Routes>
     </Router>

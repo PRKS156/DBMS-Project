@@ -7,7 +7,7 @@ async function registerUser() {
       },
       body: JSON.stringify({
         email: 'admin@vit.edu',
-        password: 'password123',
+        password: 'admin',
         role: 'ADMIN'
       })
     });

@@ -20,6 +20,7 @@ export default function AdminAccess() {
       });
       const data = await res.json();
       if (res.ok && data.role === 'ADMIN') {
+        localStorage.clear();
         localStorage.setItem('token', data.token);
         localStorage.setItem('role', data.role);
         localStorage.setItem('name', 'Administrator');
