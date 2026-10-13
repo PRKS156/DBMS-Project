@@ -59,6 +59,9 @@ export default function Dashboard() {
   const [adminAnalytics, setAdminAnalytics] = useState(null);
   const [doctorLoc, setDoctorLoc] = useState(null);
   const [docCoords, setDocCoords] = useState(null);
+  const [feedbackRating, setFeedbackRating] = useState(5);
+  const [feedbackComment, setFeedbackComment] = useState('');
+  const [showIndoorMap, setShowIndoorMap] = useState(false);
   const socketRef = useRef(null);
   const watchIdRef = useRef(null);
 
@@ -370,26 +373,37 @@ export default function Dashboard() {
     const handleDutyToggle = (goOnDuty) => {
       if (goOnDuty) {
         if (!navigator.geolocation) {
-          setError('Geolocation is not supported by your browser.');
+          setError('Geolocation is required to commence duty. Please allow location access.');
           return;
         }
-        navigator.geolocation.getCurrentPosition(async (pos) => {
-          try {
-            const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/location`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                latitude: pos.coords.latitude,
-                longitude: pos.coords.longitude
-              })
-            });
-            if (res.ok) setActive(true);
-          } catch (err) {
-            console.error(err);
-          }
-        });
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/location`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  latitude: pos.coords.latitude,
+                  longitude: pos.coords.longitude
+                })
+              });
+              if (res.ok) setActive(true);
+            } catch (err) {
+              console.error(err);
+              setActive(true);
+            }
+          },
+          (err) => {
+            alert('Cannot commence duty: GPS location permission was denied. Please allow location access in your browser so emergency dispatches can match your proximity.');
+          },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
       } else {
-        // Go off duty
+        const hasActiveEmergency = doctorAlerts.some(a => a.status === 'DISPATCHED');
+        if (hasActiveEmergency) {
+          alert('⚠️ Cannot go off duty: You have an emergency response actively in progress. Please complete the emergency response before concluding your duty session.');
+          return;
+        }
         fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -454,44 +468,64 @@ export default function Dashboard() {
                       <p style={{ margin: '0 0 6px 0' }}><strong>📋 Medical History:</strong> {alert.medicalHistory || 'None provided'}</p>
                       <p style={{ margin: '0 0 12px 0' }}><strong>📞 Contact:</strong> {alert.patientphone}</p>
 
-                      {/* Embedded Doctor -> Patient Live Navigation Map */}
-                      {patientPos && (
-                        <div style={{ margin: '14px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid #334155' }}>
-                          <div style={{ height: '220px', width: '100%' }}>
-                            <MapContainer
-                              center={patientPos}
-                              zoom={15}
-                              style={{ height: '100%', width: '100%' }}
-                              zoomControl={true}
-                            >
-                              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                              <FitBounds p1={patientPos} p2={docPos} />
-                              <Marker position={patientPos} icon={patientIcon}>
-                                <Popup>Patient Location: {alert.patientname}</Popup>
-                              </Marker>
-                              {docPos && (
-                                <>
-                                  <Marker position={docPos} icon={doctorIcon}>
-                                    <Popup>Your Location (Doctor)</Popup>
-                                  </Marker>
-                                  <Polyline positions={[docPos, patientPos]} color="#0ea5e9" dashArray="6, 8" />
-                                </>
-                              )}
-                            </MapContainer>
+                      {/* Indoor Admitted Patient Ward Card vs Outdoor Navigation Map */}
+                      {(() => {
+                        const isAdmitted = alert.description?.includes('Building') || alert.description?.includes('Floor');
+                        if (isAdmitted) {
+                          return (
+                            <div style={{ margin: '14px 0', borderRadius: '10px', padding: '14px 16px', background: '#042f2e', border: '1px solid #14b8a6', color: '#ccfbf1' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                <span style={{ fontSize: '20px' }}>🏥</span>
+                                <strong style={{ fontSize: '1rem', color: '#5eead4' }}>IN-HOSPITAL WARD DISPATCH (ADMITTED PATIENT)</strong>
+                              </div>
+                              <p style={{ margin: '0 0 8px 0', fontSize: '0.92rem' }}>
+                                <strong>Internal Room Destination:</strong> {alert.description}
+                              </p>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: '#99f6e4', marginTop: '10px' }}>
+                                <span>📍 Response Mode: <strong>Direct on-foot response</strong></span>
+                                <span>Proximity: <strong>Within facility ward</strong></span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return patientPos && (
+                          <div style={{ margin: '14px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid #334155' }}>
+                            <div style={{ height: '220px', width: '100%' }}>
+                              <MapContainer
+                                center={patientPos}
+                                zoom={15}
+                                style={{ height: '100%', width: '100%' }}
+                                zoomControl={true}
+                              >
+                                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                                <FitBounds p1={patientPos} p2={docPos} />
+                                <Marker position={patientPos} icon={patientIcon}>
+                                  <Popup>Patient Location: {alert.patientname}</Popup>
+                                </Marker>
+                                {docPos && (
+                                  <>
+                                    <Marker position={docPos} icon={doctorIcon}>
+                                      <Popup>Your Location (Doctor)</Popup>
+                                    </Marker>
+                                    <Polyline positions={[docPos, patientPos]} color="#0ea5e9" dashArray="6, 8" />
+                                  </>
+                                )}
+                              </MapContainer>
+                            </div>
+                            <div style={{ padding: '8px 12px', background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                              <span style={{ color: '#94a3b8' }}>GPS: {Number(patientPos[0]).toFixed(5)}, {Number(patientPos[1]).toFixed(5)}</span>
+                              <a
+                                href={`https://www.google.com/maps/dir/?api=1&destination=${patientPos[0]},${patientPos[1]}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                🧭 Open Google Maps Navigation ↗
+                              </a>
+                            </div>
                           </div>
-                          <div style={{ padding: '8px 12px', background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
-                            <span style={{ color: '#94a3b8' }}>GPS: {Number(patientPos[0]).toFixed(5)}, {Number(patientPos[1]).toFixed(5)}</span>
-                            <a
-                              href={`https://www.google.com/maps/dir/?api=1&destination=${patientPos[0]},${patientPos[1]}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              🧭 Open Google Maps Navigation ↗
-                            </a>
-                          </div>
-                        </div>
-                      )}
+                        );
+                      })()}
 
                       {/* Action Buttons */}
                       <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
@@ -580,60 +614,153 @@ export default function Dashboard() {
         </div>
 
         {activeAlertId && activeAlertDetails ? (
-          <div style={{ padding: '20px', border: '2px solid var(--primary)', borderRadius: '12px', backgroundColor: '#f0fdf4', color: '#0f2a31' }}>
-            <h3 style={{ color: 'var(--primary)', margin: '0 0 15px 0' }}>Doctor is on the way</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div><strong>Doctor:</strong><br/>{activeAlertDetails.doctorname}</div>
-                <div><strong>Specialty:</strong><br/>{activeAlertDetails.specialization}</div>
-                <div><strong>Phone:</strong><br/>{activeAlertDetails.doctorphone}</div>
-                <div><strong>Distance:</strong><br/>{activeAlertDetails.distanceFormatted} away</div>
+          activeAlertDetails.status === 'COMPLETED' ? (
+            <div style={{ padding: '24px', border: '2px solid #22c55e', borderRadius: '12px', backgroundColor: '#f0fdf4', color: '#0f2a31' }}>
+              <h2 style={{ color: '#166534', margin: '0 0 10px 0' }}>🎉 Emergency Response Completed</h2>
+              <p style={{ margin: '0 0 15px 0' }}>Dr. <strong>{activeAlertDetails.doctorname}</strong> ({activeAlertDetails.specialization}) has arrived and concluded this emergency response.</p>
+              
+              <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '16px' }}>
+                <h4 style={{ margin: '0 0 10px 0', color: '#0f2a31' }}>Rate Your Doctor's Care & Response Time</h4>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setFeedbackRating(star)}
+                      style={{
+                        background: feedbackRating >= star ? '#f59e0b' : '#e2e8f0',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '8px 14px',
+                        fontSize: '18px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      ★ {star}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  placeholder="Optional comments on doctor care / arrival time..."
+                  value={feedbackComment}
+                  onChange={(e) => setFeedbackComment(e.target.value)}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                />
               </div>
-              <div style={{ height: '220px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #bedcd4' }}>
-                <MapContainer
-                  center={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]}
-                  zoom={15}
-                  style={{ height: '100%', width: '100%' }}
-                  zoomControl={false}
-                >
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  <FitBounds
-                    p1={[activeAlertDetails.latitude, activeAlertDetails.longitude]}
-                    p2={doctorLoc ? [doctorLoc.latitude, doctorLoc.longitude] : null}
-                  />
-                  <Marker position={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]} icon={patientIcon}>
-                    <Popup>Your Location</Popup>
-                  </Marker>
-                  {doctorLoc && (
-                    <>
-                      <Marker position={[doctorLoc.latitude, doctorLoc.longitude]} icon={doctorIcon}>
-                        <Popup>Doctor: {activeAlertDetails.doctorname} (Live)</Popup>
-                      </Marker>
-                      <Polyline
-                        positions={[
-                          [activeAlertDetails.latitude, activeAlertDetails.longitude],
-                          [doctorLoc.latitude, doctorLoc.longitude]
-                        ]}
-                        color="#0ea5e9"
-                        dashArray="6, 8"
-                      />
-                    </>
-                  )}
-                </MapContainer>
+
+              <button
+                className="btn teal"
+                style={{ width: '100%' }}
+                onClick={async () => {
+                  try {
+                    await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${activeAlertId}/feedback`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        rating: feedbackRating,
+                        comments: feedbackComment,
+                        userId: localStorage.getItem('userId')
+                      })
+                    });
+                    alert('Thank you! Your feedback has been recorded.');
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setActiveAlertId(null);
+                    setActiveAlertDetails(null);
+                    setSuccess('');
+                  }
+                }}
+              >
+                Submit Feedback & Return to Dashboard
+              </button>
+            </div>
+          ) : (
+            <div style={{ padding: '20px', border: '2px solid var(--primary)', borderRadius: '12px', backgroundColor: '#f0fdf4', color: '#0f2a31' }}>
+              <h3 style={{ color: 'var(--primary)', margin: '0 0 15px 0' }}>Doctor is on the way</h3>
+
+              {(() => {
+                const isAdmitted = activeAlertDetails.description?.includes('Building') || activeAlertDetails.description?.includes('Floor');
+                if (isAdmitted) {
+                  return (
+                    <div style={{ background: '#fff', border: '1px solid #bedcd4', borderRadius: '10px', padding: '16px', marginBottom: '15px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#0f766e', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '20px' }}>🏥</span>
+                        <strong>IN-HOSPITAL WARD DISPATCH (ADMITTED PATIENT)</strong>
+                      </div>
+                      <p style={{ margin: '0 0 10px 0', fontSize: '0.95rem' }}>
+                        <strong>Your Room / Location:</strong> {activeAlertDetails.description}
+                      </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.9rem', color: '#334155' }}>
+                        <div><strong>Physician:</strong> Dr. {activeAlertDetails.doctorname}</div>
+                        <div><strong>Specialty:</strong> {activeAlertDetails.specialization}</div>
+                        <div><strong>Phone:</strong> {activeAlertDetails.doctorphone}</div>
+                        <div><strong>Proximity:</strong> {activeAlertDetails.distanceFormatted || 'Inside Facility'} (On-foot transit)</div>
+                      </div>
+                      <div style={{ marginTop: '12px', padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', fontSize: '0.85rem', color: '#64748b' }}>
+                        ℹ️ Street navigation map is not needed: The physician is on duty inside your facility and walking to your floor.
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div><strong>Doctor:</strong><br/>Dr. {activeAlertDetails.doctorname}</div>
+                      <div><strong>Specialty:</strong><br/>{activeAlertDetails.specialization}</div>
+                      <div><strong>Phone:</strong><br/>{activeAlertDetails.doctorphone}</div>
+                      <div><strong>Distance:</strong><br/>{activeAlertDetails.distanceFormatted} away</div>
+                    </div>
+                    <div style={{ height: '220px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #bedcd4' }}>
+                      <MapContainer
+                        center={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]}
+                        zoom={15}
+                        style={{ height: '100%', width: '100%' }}
+                        zoomControl={false}
+                      >
+                        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                        <FitBounds
+                          p1={[activeAlertDetails.latitude, activeAlertDetails.longitude]}
+                          p2={doctorLoc ? [doctorLoc.latitude, doctorLoc.longitude] : null}
+                        />
+                        <Marker position={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]} icon={patientIcon}>
+                          <Popup>Your Location</Popup>
+                        </Marker>
+                        {doctorLoc && (
+                          <>
+                            <Marker position={[doctorLoc.latitude, doctorLoc.longitude]} icon={doctorIcon}>
+                              <Popup>Doctor: Dr. {activeAlertDetails.doctorname} (Live)</Popup>
+                            </Marker>
+                            <Polyline
+                              positions={[
+                                [activeAlertDetails.latitude, activeAlertDetails.longitude],
+                                [doctorLoc.latitude, doctorLoc.longitude]
+                              ]}
+                              color="#0ea5e9"
+                              dashArray="6, 8"
+                            />
+                          </>
+                        )}
+                      </MapContainer>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ marginTop: '15px', padding: '12px', borderRadius: '8px', backgroundColor: activeAlertDetails.status === 'PENDING' ? '#fff3cd' : '#d4edda', color: '#0f2a31' }}>
+                <strong>Status: </strong>
+                {activeAlertDetails.status === 'PENDING' 
+                  ? 'We have found a doctor. Waiting for them to confirm...' 
+                  : '✅ The doctor has confirmed and is heading to your location right now!'}
               </div>
+              <button className="btn teal" style={{marginTop: '16px', width: '100%'}} onClick={() => navigate(`/track-ambulance?alertId=${activeAlertId}`)}>
+                <span aria-hidden="true">📍</span> Open Full-Screen Live Tracking
+              </button>
+              <button className="btn plain" style={{marginTop: '10px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Dismiss / Conclude Emergency</button>
             </div>
-            
-            <div style={{ marginTop: '20px', padding: '15px', borderRadius: '8px', backgroundColor: activeAlertDetails.status === 'PENDING' ? '#fff3cd' : '#d4edda', color: '#0f2a31' }}>
-              <strong>Status: </strong>
-              {activeAlertDetails.status === 'PENDING' 
-                ? 'We have found a doctor. Waiting for them to confirm...' 
-                : (activeAlertDetails.status === 'COMPLETED' ? '🎉 The doctor has arrived and completed this emergency response.' : '✅ The doctor has confirmed and is heading to your location right now!')}
-            </div>
-            <button className="btn teal" style={{marginTop: '16px', width: '100%'}} onClick={() => navigate(`/track-ambulance?alertId=${activeAlertId}`)}>
-              <span aria-hidden="true">📍</span> Open Full-Screen Live Doctor Tracking Map
-            </button>
-            <button className="btn plain" style={{marginTop: '10px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Dismiss / Conclude Emergency</button>
-          </div>
+          )
         ) : (
           <>
             <div className="form">

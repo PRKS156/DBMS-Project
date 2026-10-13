@@ -61,15 +61,20 @@ function getDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function formatETA(meters) {
-  const avgSpeed = 40; // km/h for urban ambulance
+function formatETA(meters, isAdmitted = false) {
+  if (isAdmitted || meters < 100) {
+    if (meters < 30) return 'Immediate (Same ward)';
+    return '~1 - 2 mins (On foot)';
+  }
+  const avgSpeed = 40; // km/h for urban transit
   const minutes = (meters / 1000 / avgSpeed) * 60;
   if (minutes < 1) return 'Less than 1 min';
   if (minutes < 60) return `~${Math.ceil(minutes)} min`;
   return `~${Math.floor(minutes / 60)}h ${Math.round(minutes % 60)}m`;
 }
 
-function formatDistance(meters) {
+function formatDistance(meters, isAdmitted = false) {
+  if (isAdmitted && meters < 100) return 'Within Facility Ward';
   if (meters > 1000) return `${(meters / 1000).toFixed(1)} km`;
   return `${Math.round(meters)} m`;
 }
@@ -221,6 +226,8 @@ export default function TrackAmbulance() {
         ? [parseFloat(alertDetails.doctorLat), parseFloat(alertDetails.doctorLng)]
         : null);
 
+  const isAdmitted = Boolean(alertDetails?.description?.includes('Building') || alertDetails?.description?.includes('Floor'));
+
   const distance = patientPos && doctorPos
     ? getDistance(patientPos[0], patientPos[1], doctorPos[0], doctorPos[1])
     : null;
@@ -230,6 +237,33 @@ export default function TrackAmbulance() {
 
   return (
     <div className="track-page">
+      {/* Indoor Ward Notification */}
+      {isAdmitted && (
+        <div style={{
+          position: 'absolute',
+          top: '16px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          background: 'rgba(15, 23, 42, 0.92)',
+          border: '1px solid #14b8a6',
+          borderRadius: '30px',
+          padding: '8px 20px',
+          color: '#5eead4',
+          fontSize: '0.85rem',
+          fontWeight: '600',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          maxWidth: '90%',
+          textAlign: 'center'
+        }}>
+          <span>🏥</span>
+          <span>Indoor Ward Dispatch: Patient is admitted inside facility. Responding on foot.</span>
+        </div>
+      )}
+
       {/* ─── Map ─── */}
       <div className="track-map-container">
         <MapContainer
@@ -262,7 +296,7 @@ export default function TrackAmbulance() {
                 <strong>🩺 Dr. {alertDetails?.doctorname || 'Physician'}</strong>
                 <br />
                 <span style={{ fontSize: '11px', color: '#6b8891' }}>
-                  {distance ? `${formatDistance(distance)} away` : 'Live GPS active'}
+                  {distance ? `${formatDistance(distance, isAdmitted)} away` : 'Live GPS active'}
                 </span>
               </Popup>
             </Marker>
@@ -291,7 +325,9 @@ export default function TrackAmbulance() {
           <div className={`track-status-dot ${alertDetails?.status === 'DISPATCHED' ? 'confirmed' : 'pending'}`}></div>
           <span className="track-status-text">
             {alertDetails?.status === 'DISPATCHED'
-              ? (doctorPos ? 'Doctor confirmed — heading to you now' : 'Doctor confirmed — acquiring doctor GPS...')
+              ? (isAdmitted
+                  ? 'Doctor confirmed — heading directly to your ward on foot'
+                  : (doctorPos ? 'Doctor confirmed — heading to you now' : 'Doctor confirmed — acquiring doctor GPS...'))
               : 'Finding nearest doctor...'}
           </span>
         </div>
@@ -322,13 +358,13 @@ export default function TrackAmbulance() {
           <div className="track-metric">
             <span className="track-metric-label">Distance</span>
             <strong className="track-metric-value">
-              {distance !== null ? formatDistance(distance) : 'Locating...'}
+              {distance !== null ? formatDistance(distance, isAdmitted) : 'Locating...'}
             </strong>
           </div>
           <div className="track-metric">
             <span className="track-metric-label">Est. Arrival</span>
             <strong className="track-metric-value accent">
-              {distance !== null ? formatETA(distance) : 'Locating...'}
+              {distance !== null ? formatETA(distance, isAdmitted) : 'Locating...'}
             </strong>
           </div>
           <div className="track-metric">

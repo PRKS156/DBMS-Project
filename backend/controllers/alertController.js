@@ -183,6 +183,7 @@ exports.getAlertStatus = async (req, res) => {
                 doctorphone: dispatch.doctor ? dispatch.doctor.phoneNumber : 'N/A',
                 specialization: dispatch.doctor ? dispatch.doctor.specialization : 'N/A',
                 distanceFormatted,
+                description: dispatch.alert.description,
                 latitude: dispatch.alert.latitude,
                 longitude: dispatch.alert.longitude,
                 doctorLat: dispatch.doctor ? dispatch.doctor.currentLat : null,
@@ -303,6 +304,7 @@ exports.getPatientActiveAlert = async (req, res) => {
                 doctorname: dispatch?.doctor ? dispatch.doctor.fullName : 'N/A',
                 doctorphone: dispatch?.doctor ? dispatch.doctor.phoneNumber : 'N/A',
                 specialization: dispatch?.doctor ? dispatch.doctor.specialization : 'N/A',
+                description: activeAlert.description,
                 latitude: activeAlert.latitude,
                 longitude: activeAlert.longitude,
                 doctorLat: dispatch?.doctor ? dispatch.doctor.currentLat : null,
@@ -312,5 +314,34 @@ exports.getPatientActiveAlert = async (req, res) => {
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Failed to fetch active alert.", debug: error.message });
+    }
+};
+
+exports.submitFeedback = async (req, res) => {
+    const { id } = req.params;
+    const { rating, comments, userId } = req.body;
+    try {
+        const dispatch = await prisma.dispatchRecord.findUnique({
+            where: { alertId: parseInt(id) }
+        });
+        if (!dispatch) return res.status(404).json({ success: false, message: "Dispatch record not found." });
+
+        const feedback = await prisma.feedback.upsert({
+            where: { dispatchRecordId: dispatch.id },
+            update: {
+                rating: parseInt(rating) || 5,
+                comments: comments || ''
+            },
+            create: {
+                dispatchRecordId: dispatch.id,
+                userId: parseInt(userId) || 1,
+                rating: parseInt(rating) || 5,
+                comments: comments || ''
+            }
+        });
+
+        return res.status(200).json({ success: true, message: "Feedback submitted successfully.", feedback });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to submit feedback.", debug: error.message });
     }
 };

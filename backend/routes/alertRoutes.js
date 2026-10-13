@@ -7,4 +7,5 @@ router.get('/doctor/:doctorId', alertController.getDoctorAlerts);
 router.get('/:id/status', alertController.getAlertStatus);
 router.patch('/:id/acknowledge', alertController.acknowledgeAlert);
 router.patch('/:id/complete', alertController.completeAlert);
+router.post('/:id/feedback', alertController.submitFeedback);
 module.exports = router;   
