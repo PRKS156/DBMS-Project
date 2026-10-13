@@ -1,7 +1,19 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+const sosPatientIcon = L.divIcon({
+  className: 'custom-patient-marker',
+  html: `<div style="background:#ef4444; width:34px; height:34px; border-radius:50%; border:3px solid #fff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 12px rgba(239,68,68,0.8);"><span style="font-size:16px;">🆘</span></div>`,
+  iconSize: [34, 34],
+  iconAnchor: [17, 17],
+  popupAnchor: [0, -18]
+});
 
 export default function Home() {
+  const navigate = useNavigate();
   const [loadingSOS, setLoadingSOS] = useState(false);
   const [sosStatus, setSosStatus] = useState(null);
 
@@ -29,7 +41,17 @@ export default function Home() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-           setSosStatus({ success: true, message: '🚨 AMBULANCE DISPATCHED! They have your exact location and are en route.' });
+           setSosStatus({
+             success: true,
+             alertId: data.alertId,
+             patientLat: pos.coords.latitude,
+             patientLng: pos.coords.longitude,
+             doctor: data.dispatchedDoctor,
+             message: '🚨 AMBULANCE DISPATCHED! A qualified physician has been dispatched to your location.'
+           });
+           if (data.alertId) {
+             localStorage.setItem('activeAlertId', data.alertId);
+           }
         } else {
            setSosStatus({ error: data.message || 'Failed to dispatch.' });
         }
@@ -57,8 +79,57 @@ export default function Home() {
         <p style={{ color: '#856404', marginBottom: '15px' }}>If someone is in immediate danger, use the One-Tap Guest SOS to dispatch an ambulance to your current GPS location. No account required.</p>
         
         {sosStatus && sosStatus.success ? (
-          <div style={{ padding: '15px', backgroundColor: '#d4edda', color: '#155724', borderRadius: '8px', fontWeight: 'bold' }}>
-            {sosStatus.message}
+          <div style={{ textAlign: 'left', marginTop: '10px' }}>
+            <div style={{ padding: '14px 16px', backgroundColor: '#dcfce7', color: '#166534', borderRadius: '10px', fontWeight: 'bold', border: '1px solid #86efac', marginBottom: '14px' }}>
+              {sosStatus.message}
+            </div>
+
+            {sosStatus.doctor && (
+              <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '10px', padding: '14px', marginBottom: '14px', color: '#f8fafc' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <strong style={{ fontSize: '1rem', color: '#fff' }}>Physician: {sosStatus.doctor.name}</strong>
+                  <span className="count-pill" style={{ background: '#bbf7d0', color: '#14532d', fontWeight: 'bold' }}>EN ROUTE</span>
+                </div>
+                <div style={{ fontSize: '0.88rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div><strong>Specialty:</strong> {sosStatus.doctor.specialization}</div>
+                  <div><strong>Contact:</strong> {sosStatus.doctor.phone}</div>
+                  <div><strong>Distance:</strong> {sosStatus.doctor.distance}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Embedded Live Map */}
+            {sosStatus.patientLat && sosStatus.patientLng && (
+              <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #334155', marginBottom: '14px' }}>
+                <div style={{ height: '220px', width: '100%' }}>
+                  <MapContainer
+                    center={[sosStatus.patientLat, sosStatus.patientLng]}
+                    zoom={15}
+                    style={{ height: '100%', width: '100%' }}
+                    zoomControl={true}
+                  >
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <Marker position={[sosStatus.patientLat, sosStatus.patientLng]} icon={sosPatientIcon}>
+                      <Popup>Your Emergency Location</Popup>
+                    </Marker>
+                  </MapContainer>
+                </div>
+                <div style={{ padding: '8px 12px', background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: '#94a3b8' }}>
+                  <span>📍 GPS: {sosStatus.patientLat.toFixed(5)}, {sosStatus.patientLng.toFixed(5)}</span>
+                  <span style={{ color: '#22c55e', fontWeight: '600' }}>● Location Shared with Dispatch</span>
+                </div>
+              </div>
+            )}
+
+            {sosStatus.alertId && (
+              <button
+                className="btn teal"
+                style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                onClick={() => navigate(`/track-ambulance?alertId=${sosStatus.alertId}`)}
+              >
+                📍 Track Doctor on Full Live Map ➔
+              </button>
+            )}
           </div>
         ) : (
           <button 
