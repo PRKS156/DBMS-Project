@@ -196,13 +196,16 @@ exports.getAlertStatus = async (req, res) => {
 };
 
 exports.getDoctorAlerts = async (req, res) => {
-    const { doctorId } = req.params; // this might be userId of doctor, we need DoctorProfile id
+    const { doctorId } = req.params; // userId of doctor
     try {
         const docProfile = await prisma.doctorProfile.findUnique({ where: { userId: parseInt(doctorId) }});
         if (!docProfile) return res.status(404).json({ success: false, message: "Doctor profile not found." });
 
         const dispatches = await prisma.dispatchRecord.findMany({
-            where: { doctorId: docProfile.id, alert: { status: 'PENDING' } },
+            where: {
+                doctorId: docProfile.id,
+                alert: { status: { in: ['PENDING', 'DISPATCHED'] } }
+            },
             include: { alert: { include: { patient: true } } },
             orderBy: { dispatchedAt: 'desc' }
         });
@@ -211,13 +214,17 @@ exports.getDoctorAlerts = async (req, res) => {
             alertid: d.alert.id,
             description: d.alert.description,
             status: d.alert.status,
+            latitude: d.alert.latitude,
+            longitude: d.alert.longitude,
+            doctorLat: docProfile.currentLat,
+            doctorLng: docProfile.currentLng,
             createdat: d.alert.createdAt,
-            patientname: d.alert.patient.fullName,
-            age: d.alert.patient.age,
-            gender: d.alert.patient.gender,
-            bloodgroup: d.alert.patient.bloodGroup,
-            patientphone: d.alert.patient.phoneNumber,
-            medicalHistory: d.alert.patient.medicalHistory
+            patientname: d.alert.patient?.fullName || 'Anonymous Patient',
+            age: d.alert.patient?.age || 'N/A',
+            gender: d.alert.patient?.gender || 'N/A',
+            bloodgroup: d.alert.patient?.bloodGroup || 'N/A',
+            patientphone: d.alert.patient?.phoneNumber || 'N/A',
+            medicalHistory: d.alert.patient?.medicalHistory || 'None recorded'
         }));
 
         return res.status(200).json({ success: true, alerts: mappedAlerts });
@@ -231,7 +238,7 @@ exports.acknowledgeAlert = async (req, res) => {
     try {
         await prisma.emergencyAlert.update({
             where: { id: parseInt(id) },
-            data: { status: 'DISPATCHED' } // Enum AlertStatus is PENDING, DISPATCHED, COMPLETED, CANCELLED
+            data: { status: 'DISPATCHED' }
         });
 
         // Emit real-time update to the patient tracking this alert
@@ -242,5 +249,68 @@ exports.acknowledgeAlert = async (req, res) => {
         return res.status(200).json({ success: true, message: "Alert acknowledged." });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Failed to acknowledge alert.", debug: error.message });
+    }
+};
+
+exports.completeAlert = async (req, res) => {
+    const { id } = req.params;
+    try {
+        await prisma.emergencyAlert.update({
+            where: { id: parseInt(id) },
+            data: { status: 'COMPLETED' }
+        });
+
+        await prisma.dispatchRecord.updateMany({
+            where: { alertId: parseInt(id) },
+            data: { completedAt: new Date() }
+        });
+
+        if (req.app.locals.io) {
+            req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'COMPLETED' });
+        }
+
+        return res.status(200).json({ success: true, message: "Emergency marked as completed." });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to complete alert.", debug: error.message });
+    }
+};
+
+exports.getPatientActiveAlert = async (req, res) => {
+    const { patientId } = req.params;
+    try {
+        const patProfile = await prisma.patientProfile.findUnique({ where: { userId: parseInt(patientId) } });
+        if (!patProfile) return res.status(200).json({ success: true, alert: null });
+
+        const activeAlert = await prisma.emergencyAlert.findFirst({
+            where: {
+                patientId: patProfile.id,
+                status: { in: ['PENDING', 'DISPATCHED'] }
+            },
+            orderBy: { createdAt: 'desc' },
+            include: { dispatchRecord: { include: { doctor: true } } }
+        });
+
+        if (!activeAlert) {
+            return res.status(200).json({ success: true, alert: null });
+        }
+
+        const dispatch = activeAlert.dispatchRecord;
+        return res.status(200).json({
+            success: true,
+            alert: {
+                alertid: activeAlert.id,
+                status: activeAlert.status,
+                doctorname: dispatch?.doctor ? dispatch.doctor.fullName : 'N/A',
+                doctorphone: dispatch?.doctor ? dispatch.doctor.phoneNumber : 'N/A',
+                specialization: dispatch?.doctor ? dispatch.doctor.specialization : 'N/A',
+                latitude: activeAlert.latitude,
+                longitude: activeAlert.longitude,
+                doctorLat: dispatch?.doctor ? dispatch.doctor.currentLat : null,
+                doctorLng: dispatch?.doctor ? dispatch.doctor.currentLng : null,
+                doctorId: dispatch?.doctor ? dispatch.doctor.userId : null
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to fetch active alert.", debug: error.message });
     }
 };

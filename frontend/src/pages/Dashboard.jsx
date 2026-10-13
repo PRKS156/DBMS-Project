@@ -1,16 +1,39 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import L from 'leaflet';
 
-// Fix leaflet icon issue
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-let DefaultIcon = L.icon({ iconUrl: icon, shadowUrl: iconShadow, iconAnchor: [12, 41] });
-L.Marker.prototype.options.icon = DefaultIcon;
+function FitBounds({ p1, p2 }) {
+  const map = useMap();
+  useEffect(() => {
+    if (p1 && p2 && p1[0] && p1[1] && p2[0] && p2[1]) {
+      const bounds = L.latLngBounds([p1, p2]);
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+    } else if (p1 && p1[0] && p1[1]) {
+      map.setView(p1, 15);
+    }
+  }, [p1, p2, map]);
+  return null;
+}
+
+const patientIcon = L.divIcon({
+  className: 'custom-patient-marker',
+  html: `<div style="background:#ef4444; width:34px; height:34px; border-radius:50%; border:3px solid #fff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 12px rgba(239,68,68,0.8);"><span style="font-size:16px;">🆘</span></div>`,
+  iconSize: [34, 34],
+  iconAnchor: [17, 17],
+  popupAnchor: [0, -18]
+});
+
+const doctorIcon = L.divIcon({
+  className: 'custom-doctor-marker',
+  html: `<div style="background:#0ea5e9; width:34px; height:34px; border-radius:50%; border:3px solid #fff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 12px rgba(14,165,233,0.8);"><span style="font-size:16px;">🚑</span></div>`,
+  iconSize: [34, 34],
+  iconAnchor: [17, 17],
+  popupAnchor: [0, -18]
+});
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -35,7 +58,9 @@ export default function Dashboard() {
   const [activeAlertDetails, setActiveAlertDetails] = useState(null);
   const [adminAnalytics, setAdminAnalytics] = useState(null);
   const [doctorLoc, setDoctorLoc] = useState(null);
+  const [docCoords, setDocCoords] = useState(null);
   const socketRef = useRef(null);
+  const watchIdRef = useRef(null);
 
   useEffect(() => {
     if (!token) {
@@ -45,7 +70,7 @@ export default function Dashboard() {
       fetchAdminAnalytics();
     } else if (role === 'DOCTOR') {
       fetchDoctorAlerts();
-      const interval = setInterval(fetchDoctorAlerts, 5000);
+      const interval = setInterval(fetchDoctorAlerts, 4000);
       return () => clearInterval(interval);
     }
 
@@ -54,9 +79,28 @@ export default function Dashboard() {
       socketRef.current.on('alertUpdate', (data) => {
         if (data.status === 'DISPATCHED') {
           setActiveAlertDetails(prev => prev ? { ...prev, status: 'DISPATCHED' } : prev);
+        } else if (data.status === 'COMPLETED') {
+          setActiveAlertDetails(prev => prev ? { ...prev, status: 'COMPLETED' } : prev);
         }
       });
-      return () => socketRef.current.disconnect();
+
+      // Restore active alert on mount if patient had an emergency in progress
+      const restoreActive = async () => {
+        try {
+          const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/patient/${localStorage.getItem('userId')}/active`);
+          const data = await res.json();
+          if (res.ok && data.success && data.alert) {
+            setActiveAlertId(data.alert.alertid);
+            setActiveAlertDetails(data.alert);
+            if (data.alert.doctorLat && data.alert.doctorLng) {
+              setDoctorLoc({ latitude: parseFloat(data.alert.doctorLat), longitude: parseFloat(data.alert.doctorLng) });
+            }
+          }
+        } catch(e) { console.error(e); }
+      };
+      restoreActive();
+
+      return () => socketRef.current && socketRef.current.disconnect();
     }
   }, [token, navigate, role]);
 
@@ -64,7 +108,7 @@ export default function Dashboard() {
     if (role === 'PATIENT' && activeAlertId && socketRef.current) {
       socketRef.current.emit('joinAlertRoom', activeAlertId);
       socketRef.current.on(`doctorLocation`, (loc) => {
-         setDoctorLoc(loc);
+         setDoctorLoc({ latitude: parseFloat(loc.latitude), longitude: parseFloat(loc.longitude) });
       });
     }
   }, [role, activeAlertId]);
@@ -76,11 +120,18 @@ export default function Dashboard() {
         try {
           const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${activeAlertId}/status`);
           const data = await res.json();
-          if (res.ok && data.success) {
+          if (res.ok && data.success && data.alert) {
             setActiveAlertDetails(data.alert);
-            if (data.alert.doctorId) {
-              // Listen to specific doctor location updates once assigned
-              socketRef.current.on(`doctorLocation_${data.alert.doctorId}`, (loc) => setDoctorLoc(loc));
+            if (data.alert.doctorLat && data.alert.doctorLng) {
+              setDoctorLoc({
+                latitude: parseFloat(data.alert.doctorLat),
+                longitude: parseFloat(data.alert.doctorLng)
+              });
+            }
+            if (data.alert.doctorId && socketRef.current) {
+              socketRef.current.on(`doctorLocation_${data.alert.doctorId}`, (loc) => {
+                setDoctorLoc({ latitude: parseFloat(loc.latitude), longitude: parseFloat(loc.longitude) });
+              });
             }
           }
         } catch(err) { console.error(err); }
@@ -91,27 +142,44 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [role, activeAlertId]);
 
+  // Continuous high-accuracy GPS tracking for Doctor on Duty
   useEffect(() => {
-    let locationInterval;
     if (role === 'DOCTOR' && active) {
-      locationInterval = setInterval(() => {
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(async (pos) => {
-            try {
-              await fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/location`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  latitude: pos.coords.latitude,
-                  longitude: pos.coords.longitude
-                })
-              });
-            } catch (err) { console.error(err); }
+      const updateLocation = async (lat, lng) => {
+        setDocCoords({ latitude: lat, longitude: lng });
+        try {
+          await fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/location`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ latitude: lat, longitude: lng })
           });
-        }
-      }, 10000); // Update doctor's live location every 10 seconds
+        } catch (err) { console.error(err); }
+      };
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((pos) => {
+          updateLocation(pos.coords.latitude, pos.coords.longitude);
+        });
+
+        watchIdRef.current = navigator.geolocation.watchPosition(
+          (pos) => updateLocation(pos.coords.latitude, pos.coords.longitude),
+          (err) => console.warn(err),
+          { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+        );
+      }
+    } else {
+      if (watchIdRef.current) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
     }
-    return () => clearInterval(locationInterval);
+
+    return () => {
+      if (watchIdRef.current) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
   }, [role, active]);
 
   const fetchDoctorAlerts = async () => {
@@ -129,6 +197,15 @@ export default function Dashboard() {
   const acknowledgeAlert = async (alertId) => {
     try {
       await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${alertId}/acknowledge`, { method: 'PATCH' });
+      fetchDoctorAlerts();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const completeAlert = async (alertId) => {
+    try {
+      await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${alertId}/complete`, { method: 'PATCH' });
       fetchDoctorAlerts();
     } catch (err) {
       console.error(err);
@@ -340,21 +417,81 @@ export default function Dashboard() {
             {doctorAlerts.length === 0 ? (
               <div className="empty-note">No requests have been assigned to you at this time. This view refreshes automatically.</div>
             ) : (
-              <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2rem'}}>
-                {doctorAlerts.map(alert => (
-                  <div key={alert.alertid} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '15px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <strong>{alert.patientname} ({alert.age}y, {alert.gender}) - Blood: {alert.bloodgroup}</strong>
-                      <span className="count-pill" style={{backgroundColor: alert.status === 'PENDING' ? '#ffeb3b' : '#c8e6c9', color: '#000'}}>{alert.status}</span>
+              <div style={{display: 'flex', flexDirection: 'column', gap: '1.5rem', marginBottom: '2rem'}}>
+                {doctorAlerts.map(alert => {
+                  const patientPos = alert.latitude && alert.longitude ? [parseFloat(alert.latitude), parseFloat(alert.longitude)] : null;
+                  const docPos = docCoords ? [docCoords.latitude, docCoords.longitude] : (alert.doctorLat && alert.doctorLng ? [parseFloat(alert.doctorLat), parseFloat(alert.doctorLng)] : null);
+                  return (
+                    <div key={alert.alertid} style={{ border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'rgba(255,255,255,0.02)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                        <strong style={{ fontSize: '1.05rem' }}>{alert.patientname} ({alert.age}y, {alert.gender}) - Blood: {alert.bloodgroup}</strong>
+                        <span className="count-pill" style={{
+                          backgroundColor: alert.status === 'PENDING' ? '#fef08a' : '#bbf7d0',
+                          color: alert.status === 'PENDING' ? '#854d0e' : '#14532d',
+                          fontWeight: '600'
+                        }}>
+                          {alert.status === 'PENDING' ? '⚡ PENDING ACKNOWLEDGMENT' : '🚑 EN ROUTE (DISPATCHED)'}
+                        </span>
+                      </div>
+                      <p style={{ margin: '0 0 6px 0' }}><strong>📍 Location details:</strong> {alert.description}</p>
+                      <p style={{ margin: '0 0 6px 0' }}><strong>📋 Medical History:</strong> {alert.medicalHistory || 'None provided'}</p>
+                      <p style={{ margin: '0 0 12px 0' }}><strong>📞 Contact:</strong> {alert.patientphone}</p>
+
+                      {/* Embedded Doctor -> Patient Live Navigation Map */}
+                      {patientPos && (
+                        <div style={{ margin: '14px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid #334155' }}>
+                          <div style={{ height: '220px', width: '100%' }}>
+                            <MapContainer
+                              center={patientPos}
+                              zoom={15}
+                              style={{ height: '100%', width: '100%' }}
+                              zoomControl={true}
+                            >
+                              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                              <FitBounds p1={patientPos} p2={docPos} />
+                              <Marker position={patientPos} icon={patientIcon}>
+                                <Popup>Patient Location: {alert.patientname}</Popup>
+                              </Marker>
+                              {docPos && (
+                                <>
+                                  <Marker position={docPos} icon={doctorIcon}>
+                                    <Popup>Your Location (Doctor)</Popup>
+                                  </Marker>
+                                  <Polyline positions={[docPos, patientPos]} color="#0ea5e9" dashArray="6, 8" />
+                                </>
+                              )}
+                            </MapContainer>
+                          </div>
+                          <div style={{ padding: '8px 12px', background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                            <span style={{ color: '#94a3b8' }}>GPS: {alert.latitude.toFixed(5)}, {alert.longitude.toFixed(5)}</span>
+                            <a
+                              href={`https://www.google.com/maps/dir/?api=1&destination=${alert.latitude},${alert.longitude}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              🧭 Open Google Maps Navigation ↗
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                        {alert.status === 'PENDING' && (
+                          <button className="btn teal" style={{ flex: 1 }} onClick={() => acknowledgeAlert(alert.alertid)}>
+                            🚨 Accept & Start En Route
+                          </button>
+                        )}
+                        {alert.status === 'DISPATCHED' && (
+                          <button className="btn" style={{ flex: 1, background: '#10b981', color: '#fff', border: 'none' }} onClick={() => completeAlert(alert.alertid)}>
+                            ✅ Mark Arrived / Complete Mission
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <p style={{ margin: '0 0 5px 0' }}><strong>Location:</strong> {alert.description}</p>
-                    <p style={{ margin: '0 0 10px 0' }}><strong>Medical History:</strong> {alert.medicalHistory || 'None provided'}</p>
-                    <p style={{ margin: '0 0 15px 0' }}><strong>Contact:</strong> {alert.patientphone}</p>
-                    {alert.status === 'PENDING' && (
-                      <button className="btn teal" onClick={() => acknowledgeAlert(alert.alertid)}>Acknowledge En Route</button>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             
@@ -429,22 +566,41 @@ export default function Dashboard() {
           <div style={{ padding: '20px', border: '2px solid var(--primary)', borderRadius: '12px', backgroundColor: '#f0fdf4', color: '#0f2a31' }}>
             <h3 style={{ color: 'var(--primary)', margin: '0 0 15px 0' }}>Doctor is on the way</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div><strong>Doctor:</strong><br/>{activeAlertDetails.doctorname}</div>
                 <div><strong>Specialty:</strong><br/>{activeAlertDetails.specialization}</div>
                 <div><strong>Phone:</strong><br/>{activeAlertDetails.doctorphone}</div>
                 <div><strong>Distance:</strong><br/>{activeAlertDetails.distanceFormatted} away</div>
               </div>
-              <div style={{ height: '200px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #bedcd4' }}>
-                <MapContainer center={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+              <div style={{ height: '220px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #bedcd4' }}>
+                <MapContainer
+                  center={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]}
+                  zoom={15}
+                  style={{ height: '100%', width: '100%' }}
+                  zoomControl={false}
+                >
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  <Marker position={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]}>
+                  <FitBounds
+                    p1={[activeAlertDetails.latitude, activeAlertDetails.longitude]}
+                    p2={doctorLoc ? [doctorLoc.latitude, doctorLoc.longitude] : null}
+                  />
+                  <Marker position={[activeAlertDetails.latitude || 0, activeAlertDetails.longitude || 0]} icon={patientIcon}>
                     <Popup>Your Location</Popup>
                   </Marker>
                   {doctorLoc && (
-                    <Marker position={[doctorLoc.latitude, doctorLoc.longitude]}>
-                      <Popup>Doctor Location</Popup>
-                    </Marker>
+                    <>
+                      <Marker position={[doctorLoc.latitude, doctorLoc.longitude]} icon={doctorIcon}>
+                        <Popup>Doctor: {activeAlertDetails.doctorname} (Live)</Popup>
+                      </Marker>
+                      <Polyline
+                        positions={[
+                          [activeAlertDetails.latitude, activeAlertDetails.longitude],
+                          [doctorLoc.latitude, doctorLoc.longitude]
+                        ]}
+                        color="#0ea5e9"
+                        dashArray="6, 8"
+                      />
+                    </>
                   )}
                 </MapContainer>
               </div>
@@ -454,12 +610,12 @@ export default function Dashboard() {
               <strong>Status: </strong>
               {activeAlertDetails.status === 'PENDING' 
                 ? 'We have found a doctor. Waiting for them to confirm...' 
-                : '✅ The doctor has confirmed and is heading to your location right now!'}
+                : (activeAlertDetails.status === 'COMPLETED' ? '🎉 The doctor has arrived and completed this emergency response.' : '✅ The doctor has confirmed and is heading to your location right now!')}
             </div>
             <button className="btn teal" style={{marginTop: '16px', width: '100%'}} onClick={() => navigate(`/track-ambulance?alertId=${activeAlertId}`)}>
-              <span aria-hidden="true">📍</span> Track Doctor on Map
+              <span aria-hidden="true">📍</span> Open Full-Screen Live Tracking Map
             </button>
-            <button className="btn plain" style={{marginTop: '10px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Cancel or start over</button>
+            <button className="btn plain" style={{marginTop: '10px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Dismiss / Conclude Emergency</button>
           </div>
         ) : (
           <>
