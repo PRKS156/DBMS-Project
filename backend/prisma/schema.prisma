@@ -95,7 +95,7 @@ model Vehicle {
 model EmergencyAlert {
   id             Int       @id @default(autoincrement())
   patientId      Int
-  patient        PatientProfile @relation(fields: [patientId], references: [id])
+  patient        PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
   latitude       Float
   longitude      Float
   status         AlertStatus    @default(PENDING)
@@ -136,7 +136,7 @@ model Feedback {
   dispatchRecord   DispatchRecord @relation(fields: [dispatchRecordId], references: [id], onDelete: Cascade)
   
   userId           Int
-  user             User      @relation(fields: [userId], references: [id])
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   rating           Int       // 1-5
   comments         String?
