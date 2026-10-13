@@ -26,16 +26,13 @@ function createPatientIcon() {
 function createDoctorIcon() {
   return L.divIcon({
     className: 'custom-marker-doctor',
-    html: `<div class="marker-pin doctor-pin">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-        <polyline points="9 22 9 12 15 12 15 22"/>
-      </svg>
+    html: `<div class="marker-pin doctor-pin" style="display:flex;align-items:center;justify-content:center;background:#0ea5e9;border:3px solid #fff;border-radius:50%;width:42px;height:42px;box-shadow:0 0 16px rgba(14,165,233,0.7);font-size:20px;cursor:pointer;">
+      🩺
     </div>
     <div class="marker-pulse doctor-pulse"></div>`,
-    iconSize: [48, 48],
-    iconAnchor: [24, 24],
-    popupAnchor: [0, -28]
+    iconSize: [42, 42],
+    iconAnchor: [21, 21],
+    popupAnchor: [0, -24]
   });
 }
 
@@ -180,8 +177,6 @@ export default function TrackAmbulance() {
     return null;
   });
 
-  const [simStep, setSimStep] = useState(0.08);
-
   useEffect(() => {
     if (!browserPos && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -197,14 +192,6 @@ export default function TrackAmbulance() {
     }
   }, [browserPos]);
 
-  // Smooth ambulance approach simulation
-  useEffect(() => {
-    const simInterval = setInterval(() => {
-      setSimStep((prev) => Math.min(prev + 0.025, 0.95));
-    }, 2500);
-    return () => clearInterval(simInterval);
-  }, []);
-
   const patientIcon = useMemo(() => createPatientIcon(), []);
   const doctorIcon = useMemo(() => createDoctorIcon(), []);
 
@@ -214,7 +201,7 @@ export default function TrackAmbulance() {
         <div className="heading">
           <span className="eyebrow">Tracking</span>
           <h1>No active emergency.</h1>
-          <p className="sub">You need an active emergency alert to track the ambulance.</p>
+          <p className="sub">You need an active emergency alert to track the assigned doctor.</p>
         </div>
         <button className="btn teal" onClick={() => navigate('/patient-dashboard')}>
           Go to Dashboard <span aria-hidden="true">→</span>
@@ -227,16 +214,12 @@ export default function TrackAmbulance() {
     ? [parseFloat(alertDetails.latitude), parseFloat(alertDetails.longitude)]
     : (browserPos || [12.97187, 79.16541]);
 
-  const rawDoctorPos = (doctorLoc?.latitude && doctorLoc?.longitude)
-    ? [doctorLoc.latitude, doctorLoc.longitude]
+  // Real Doctor GPS location - strictly from live doctorLoc (socket) or alertDetails (database)
+  const doctorPos = (doctorLoc?.latitude && doctorLoc?.longitude)
+    ? [parseFloat(doctorLoc.latitude), parseFloat(doctorLoc.longitude)]
     : (alertDetails?.doctorLat && alertDetails?.doctorLng
         ? [parseFloat(alertDetails.doctorLat), parseFloat(alertDetails.doctorLng)]
-        : [patientPos[0] + 0.0035, patientPos[1] + 0.0028]);
-
-  const doctorPos = [
-    rawDoctorPos[0] + (patientPos[0] - rawDoctorPos[0]) * simStep,
-    rawDoctorPos[1] + (patientPos[1] - rawDoctorPos[1]) * simStep
-  ];
+        : null);
 
   const distance = patientPos && doctorPos
     ? getDistance(patientPos[0], patientPos[1], doctorPos[0], doctorPos[1])
@@ -276,10 +259,10 @@ export default function TrackAmbulance() {
           {doctorPos && (
             <Marker position={doctorPos} icon={doctorIcon}>
               <Popup className="custom-popup">
-                <strong>🚑 {alertDetails?.doctorname || 'Doctor'}</strong>
+                <strong>🩺 Dr. {alertDetails?.doctorname || 'Physician'}</strong>
                 <br />
                 <span style={{ fontSize: '11px', color: '#6b8891' }}>
-                  {distance ? `${formatDistance(distance)} away` : 'En route'}
+                  {distance ? `${formatDistance(distance)} away` : 'Live GPS active'}
                 </span>
               </Popup>
             </Marker>
@@ -308,7 +291,7 @@ export default function TrackAmbulance() {
           <div className={`track-status-dot ${alertDetails?.status === 'DISPATCHED' ? 'confirmed' : 'pending'}`}></div>
           <span className="track-status-text">
             {alertDetails?.status === 'DISPATCHED'
-              ? 'Doctor confirmed — heading to you now'
+              ? (doctorPos ? 'Doctor confirmed — heading to you now' : 'Doctor confirmed — acquiring doctor GPS...')
               : 'Finding nearest doctor...'}
           </span>
         </div>
@@ -323,7 +306,7 @@ export default function TrackAmbulance() {
               </svg>
             </div>
             <div className="track-doctor-info">
-              <h3>{alertDetails.doctorname}</h3>
+              <h3>Dr. {alertDetails.doctorname}</h3>
               <span>{alertDetails.specialization}</span>
             </div>
             <a href={`tel:${alertDetails.doctorphone}`} className="track-call-btn" title="Call doctor">
@@ -336,18 +319,18 @@ export default function TrackAmbulance() {
 
         {/* Live metrics */}
         <div className="track-metrics">
-          {distance !== null && (
-            <div className="track-metric">
-              <span className="track-metric-label">Distance</span>
-              <strong className="track-metric-value">{formatDistance(distance)}</strong>
-            </div>
-          )}
-          {distance !== null && (
-            <div className="track-metric">
-              <span className="track-metric-label">Est. Arrival</span>
-              <strong className="track-metric-value accent">{formatETA(distance)}</strong>
-            </div>
-          )}
+          <div className="track-metric">
+            <span className="track-metric-label">Distance</span>
+            <strong className="track-metric-value">
+              {distance !== null ? formatDistance(distance) : 'Locating...'}
+            </strong>
+          </div>
+          <div className="track-metric">
+            <span className="track-metric-label">Est. Arrival</span>
+            <strong className="track-metric-value accent">
+              {distance !== null ? formatETA(distance) : 'Locating...'}
+            </strong>
+          </div>
           <div className="track-metric">
             <span className="track-metric-label">Elapsed</span>
             <strong className="track-metric-value">{elapsedMin}:{String(elapsedSec).padStart(2, '0')}</strong>

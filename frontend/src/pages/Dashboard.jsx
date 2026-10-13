@@ -29,7 +29,7 @@ const patientIcon = L.divIcon({
 
 const doctorIcon = L.divIcon({
   className: 'custom-doctor-marker',
-  html: `<div style="background:#0ea5e9; width:34px; height:34px; border-radius:50%; border:3px solid #fff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 12px rgba(14,165,233,0.8);"><span style="font-size:16px;">🚑</span></div>`,
+  html: `<div style="background:#0ea5e9; width:34px; height:34px; border-radius:50%; border:3px solid #fff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 12px rgba(14,165,233,0.8);"><span style="font-size:16px;">🩺</span></div>`,
   iconSize: [34, 34],
   iconAnchor: [17, 17],
   popupAnchor: [0, -18]
@@ -447,7 +447,7 @@ export default function Dashboard() {
                           color: alert.status === 'PENDING' ? '#854d0e' : '#14532d',
                           fontWeight: '600'
                         }}>
-                          {alert.status === 'PENDING' ? '⚡ PENDING ACKNOWLEDGMENT' : '🚑 EN ROUTE (DISPATCHED)'}
+                          {alert.status === 'PENDING' ? '⚡ PENDING ACKNOWLEDGMENT' : '🩺 EN ROUTE (DISPATCHED)'}
                         </span>
                       </div>
                       <p style={{ margin: '0 0 6px 0' }}><strong>📍 Location details:</strong> {alert.description}</p>
@@ -630,7 +630,7 @@ export default function Dashboard() {
                 : (activeAlertDetails.status === 'COMPLETED' ? '🎉 The doctor has arrived and completed this emergency response.' : '✅ The doctor has confirmed and is heading to your location right now!')}
             </div>
             <button className="btn teal" style={{marginTop: '16px', width: '100%'}} onClick={() => navigate(`/track-ambulance?alertId=${activeAlertId}`)}>
-              <span aria-hidden="true">📍</span> Open Full-Screen Live Tracking Map
+              <span aria-hidden="true">📍</span> Open Full-Screen Live Doctor Tracking Map
             </button>
             <button className="btn plain" style={{marginTop: '10px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Dismiss / Conclude Emergency</button>
           </div>

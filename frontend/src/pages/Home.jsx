@@ -47,7 +47,7 @@ export default function Home() {
              patientLat: pos.coords.latitude,
              patientLng: pos.coords.longitude,
              doctor: data.dispatchedDoctor,
-             message: '🚨 AMBULANCE DISPATCHED! A qualified physician has been dispatched to your location.'
+             message: '🩺 DOCTOR DISPATCHED! A qualified physician has been dispatched to your location.'
            });
            if (data.alertId) {
              localStorage.setItem('activeAlertId', data.alertId);
@@ -76,7 +76,7 @@ export default function Home() {
       
       <div className="panel" style={{ textAlign: 'center', backgroundColor: '#fff3cd', borderColor: '#ffeeba' }}>
         <h2 style={{ color: '#856404' }}>Critical Emergency?</h2>
-        <p style={{ color: '#856404', marginBottom: '15px' }}>If someone is in immediate danger, use the One-Tap Guest SOS to dispatch an ambulance to your current GPS location. No account required.</p>
+        <p style={{ color: '#856404', marginBottom: '15px' }}>If someone is in immediate danger, use the One-Tap Guest SOS to dispatch an emergency physician to your current GPS location. No account required.</p>
         
         {sosStatus && sosStatus.success ? (
           <div style={{ textAlign: 'left', marginTop: '10px' }}>
