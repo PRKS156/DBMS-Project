@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const alertController = require('../controllers/alertController');
+router.get('/hospitals', alertController.getHospitals);
 router.post('/trigger', alertController.triggerAlert);
 router.get('/patient/:patientId/active', alertController.getPatientActiveAlert);
 router.get('/doctor/:doctorId', alertController.getDoctorAlerts);

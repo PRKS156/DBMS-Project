@@ -44,6 +44,13 @@ export default function Dashboard() {
   const [active, setActive] = useState(false);
   const [emergencyType, setEmergencyType] = useState('Unsure / General');
   const [locationType, setLocationType] = useState('Outside');
+  const [hospitalId, setHospitalId] = useState(1);
+  const [hospitalName, setHospitalName] = useState('City General Hospital');
+  const [hospitalsList, setHospitalsList] = useState([
+    { id: 1, name: 'City General Hospital', address: 'Sector 4, Katpadi Road, Vellore' },
+    { id: 2, name: 'VIT Health Centre', address: 'Main Campus Health Facility, VIT Vellore' },
+    { id: 3, name: 'Apollo Speciality Care', address: 'Bypass Road, Vellore' }
+  ]);
   const [floor, setFloor] = useState('');
   const [room, setRoom] = useState('');
   const [landmark, setLandmark] = useState('');
@@ -78,6 +85,18 @@ export default function Dashboard() {
     }
 
     if (role === 'PATIENT') {
+      // Fetch dynamic hospital network list
+      fetch('https://emergency-backend-3ppk.onrender.com/api/alerts/hospitals')
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.hospitals && data.hospitals.length > 0) {
+            setHospitalsList(data.hospitals);
+            setHospitalId(data.hospitals[0].id);
+            setHospitalName(data.hospitals[0].name);
+          }
+        })
+        .catch(err => console.warn('Could not load dynamic hospital list, using defaults:', err));
+
       socketRef.current = io('https://emergency-backend-3ppk.onrender.com');
       socketRef.current.on('alertUpdate', (data) => {
         if (data.status === 'DISPATCHED') {
@@ -464,13 +483,19 @@ export default function Dashboard() {
                           {alert.status === 'PENDING' ? '⚡ PENDING ACKNOWLEDGMENT' : '🩺 EN ROUTE (DISPATCHED)'}
                         </span>
                       </div>
+                      {alert.hospitalName && (
+                        <p style={{ margin: '0 0 6px 0' }}><strong>🏥 Hospital Facility:</strong> {alert.hospitalName}</p>
+                      )}
                       <p style={{ margin: '0 0 6px 0' }}><strong>📍 Location details:</strong> {alert.description}</p>
                       <p style={{ margin: '0 0 6px 0' }}><strong>📋 Medical History:</strong> {alert.medicalHistory || 'None provided'}</p>
                       <p style={{ margin: '0 0 12px 0' }}><strong>📞 Contact:</strong> {alert.patientphone}</p>
 
                       {/* Indoor Admitted Patient Ward Card vs Outdoor Navigation Map */}
                       {(() => {
-                        const isAdmitted = alert.description?.includes('Building') || alert.description?.includes('Floor');
+                        const isAdmitted = Boolean(
+                          (alert.description?.includes('Floor:') || alert.description?.includes('Floor ') || alert.description?.includes('Building')) &&
+                          !alert.description?.includes('Outdoor SOS')
+                        );
                         if (isAdmitted) {
                           return (
                             <div style={{ margin: '14px 0', borderRadius: '10px', padding: '14px 16px', background: '#042f2e', border: '1px solid #14b8a6', color: '#ccfbf1' }}>
@@ -580,6 +605,8 @@ export default function Dashboard() {
               longitude: pos.coords.longitude,
               requiredSpecialization: emergencyType,
               locationType,
+              hospitalId: parseInt(hospitalId),
+              hospitalName: hospitalsList.find(h => h.id === parseInt(hospitalId))?.name || hospitalName,
               floor: locationType === 'Building' ? floor : undefined,
               roomNumber: locationType === 'Building' ? room : undefined,
               landmark: landmark
@@ -682,7 +709,10 @@ export default function Dashboard() {
               <h3 style={{ color: 'var(--primary)', margin: '0 0 15px 0' }}>Doctor is on the way</h3>
 
               {(() => {
-                const isAdmitted = activeAlertDetails.description?.includes('Building') || activeAlertDetails.description?.includes('Floor');
+                const isAdmitted = Boolean(
+                  (activeAlertDetails.description?.includes('Floor:') || activeAlertDetails.description?.includes('Floor ') || activeAlertDetails.description?.includes('Building')) &&
+                  !activeAlertDetails.description?.includes('Outdoor SOS')
+                );
                 if (isAdmitted) {
                   return (
                     <div style={{ background: '#fff', border: '1px solid #bedcd4', borderRadius: '10px', padding: '16px', marginBottom: '15px' }}>
@@ -694,6 +724,7 @@ export default function Dashboard() {
                         <strong>Your Room / Location:</strong> {activeAlertDetails.description}
                       </p>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.9rem', color: '#334155' }}>
+                        <div><strong>Hospital Facility:</strong> 🏥 {activeAlertDetails.hospitalName || 'Network Hospital'}</div>
                         <div><strong>Physician:</strong> Dr. {activeAlertDetails.doctorname}</div>
                         <div><strong>Specialty:</strong> {activeAlertDetails.specialization}</div>
                         <div><strong>Phone:</strong> {activeAlertDetails.doctorphone}</div>
@@ -708,6 +739,9 @@ export default function Dashboard() {
                 return (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {activeAlertDetails.hospitalName && (
+                        <div><strong>Dispatching Hospital:</strong><br/>🏥 {activeAlertDetails.hospitalName}</div>
+                      )}
                       <div><strong>Doctor:</strong><br/>Dr. {activeAlertDetails.doctorname}</div>
                       <div><strong>Specialty:</strong><br/>{activeAlertDetails.specialization}</div>
                       <div><strong>Phone:</strong><br/>{activeAlertDetails.doctorphone}</div>
@@ -767,38 +801,79 @@ export default function Dashboard() {
               <div className="field">
                 <label>What kind of emergency is it?</label>
                 <select value={emergencyType} onChange={e => setEmergencyType(e.target.value)}>
-                  <optgroup label="Common emergencies">
-                    <option value="Cardiology">Heart / Chest Pain</option>
-                    <option value="Trauma Surgery">Severe injury or accident</option>
-                    <option value="Pediatrics">Child emergency</option>
-                    <option value="Orthopedics">Bone or joint injury</option>
+                  <optgroup label="Specialized Emergencies">
+                    <option value="Cardiology">Heart / Chest Pain (Cardiology)</option>
+                    <option value="Trauma Surgery">Severe injury or accident (Trauma)</option>
+                    <option value="Pediatrics">Child emergency (Pediatrics)</option>
+                    <option value="Orthopedics">Bone or joint injury (Orthopedics)</option>
                   </optgroup>
                   <option value="Unsure / General">I'm not sure / General emergency</option>
                 </select>
               </div>
+
               <div className="field">
-                <label>Where are you?</label>
-                <select value={locationType} onChange={e => setLocationType(e.target.value)}>
-                  <option value="Outside">Outside / Street / Home</option>
-                  <option value="Building">Inside a Hospital / Building</option>
+                <label>Hospital Network / Target Medical Facility</label>
+                <select 
+                  value={hospitalId} 
+                  onChange={e => {
+                    const id = parseInt(e.target.value);
+                    setHospitalId(id);
+                    const found = hospitalsList.find(h => h.id === id);
+                    if (found) setHospitalName(found.name);
+                  }}
+                >
+                  {hospitalsList.map(h => (
+                    <option key={h.id} value={h.id}>
+                      🏥 {h.name} {h.address ? `(${h.address})` : ''}
+                    </option>
+                  ))}
                 </select>
               </div>
-              <p className="caption">Please give us exact details so the doctor can find you quickly.</p>
+
+              <div className="field">
+                <label>Where are you located?</label>
+                <select value={locationType} onChange={e => setLocationType(e.target.value)}>
+                  <option value="Outside">Outside / Street / Home (Dispatch Ambulance & Physician)</option>
+                  <option value="Building">Inside Hospital Facility / Ward (Admitted Inpatient Alert)</option>
+                </select>
+              </div>
+
+              <p className="caption">
+                {locationType === 'Building'
+                  ? `🏥 Inpatient Ward Response: Dispatched within ${hospitalsList.find(h => h.id === parseInt(hospitalId))?.name || hospitalName}. Enter floor and room for on-foot clinical arrival.`
+                  : `🚑 Field Emergency: Dispatching closest emergency team from ${hospitalsList.find(h => h.id === parseInt(hospitalId))?.name || hospitalName} to your live street coordinates.`}
+              </p>
+
               {locationType === 'Building' ? (
-                <>
+                <div className="split">
                   <div className="field">
-                    <label>Building / Hospital Name</label>
-                    <input type="text" placeholder="e.g., City General Hospital" value={landmark} onChange={e => setLandmark(e.target.value)} />
+                    <label>Floor / Ward</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., 3rd Floor, West Wing" 
+                      value={floor} 
+                      onChange={e => setFloor(e.target.value)} 
+                    />
                   </div>
-                  <div className="split">
-                    <div className="field"><label>Floor</label><input type="text" placeholder="Third floor" value={floor} onChange={e => setFloor(e.target.value)} /></div>
-                    <div className="field"><label>Room</label><input type="text" placeholder="Room 312" value={room} onChange={e => setRoom(e.target.value)} /></div>
+                  <div className="field">
+                    <label>Room / Bed Number</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., Room 312, Bed B" 
+                      value={room} 
+                      onChange={e => setRoom(e.target.value)} 
+                    />
                   </div>
-                </>
+                </div>
               ) : (
                 <div className="field">
-                  <label>Landmark / Address</label>
-                  <input type="text" placeholder="e.g., Near Central Park entrance" value={landmark} onChange={e => setLandmark(e.target.value)} />
+                  <label>Street Landmark / Pickup Address</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g., Near VIT Main Gate, Katpadi Road" 
+                    value={landmark} 
+                    onChange={e => setLandmark(e.target.value)} 
+                  />
                 </div>
               )}
             </div>

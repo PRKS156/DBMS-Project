@@ -226,7 +226,10 @@ export default function TrackAmbulance() {
         ? [parseFloat(alertDetails.doctorLat), parseFloat(alertDetails.doctorLng)]
         : null);
 
-  const isAdmitted = Boolean(alertDetails?.description?.includes('Building') || alertDetails?.description?.includes('Floor'));
+  const isAdmitted = Boolean(
+    (alertDetails?.description?.includes('Floor:') || alertDetails?.description?.includes('Floor ') || alertDetails?.description?.includes('Building')) &&
+    !alertDetails?.description?.includes('Outdoor SOS')
+  );
 
   const distance = patientPos && doctorPos
     ? getDistance(patientPos[0], patientPos[1], doctorPos[0], doctorPos[1])
@@ -260,7 +263,10 @@ export default function TrackAmbulance() {
           textAlign: 'center'
         }}>
           <span>🏥</span>
-          <span>Indoor Ward Dispatch: Patient is admitted inside facility. Responding on foot.</span>
+          <span>
+            {alertDetails?.hospitalName ? `${alertDetails.hospitalName} Ward Dispatch: ` : 'Indoor Ward Dispatch: '}
+            Patient is admitted inside facility. Responding on foot.
+          </span>
         </div>
       )}
 
@@ -344,6 +350,11 @@ export default function TrackAmbulance() {
             <div className="track-doctor-info">
               <h3>Dr. {alertDetails.doctorname}</h3>
               <span>{alertDetails.specialization}</span>
+              {alertDetails.hospitalName && (
+                <span style={{ display: 'block', fontSize: '12px', color: '#5eead4', marginTop: '3px', fontWeight: '500' }}>
+                  🏥 {alertDetails.hospitalName}
+                </span>
+              )}
             </div>
             <a href={`tel:${alertDetails.doctorphone}`} className="track-call-btn" title="Call doctor">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

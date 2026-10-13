@@ -16,8 +16,19 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
+exports.getHospitals = async (req, res) => {
+    try {
+        const hospitals = await prisma.hospital.findMany({
+            orderBy: { id: 'asc' }
+        });
+        return res.status(200).json({ success: true, hospitals });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to fetch hospitals.", debug: error.message });
+    }
+};
+
 exports.triggerAlert = async (req, res) => {
-    const { patientId, latitude, longitude, requiredSpecialization, floor, roomNumber, bedNumber, locationType, landmark } = req.body;
+    const { patientId, latitude, longitude, requiredSpecialization, floor, roomNumber, bedNumber, locationType, landmark, hospitalId, hospitalName } = req.body;
 
     const lat = parseFloat(latitude);
     const lng = parseFloat(longitude);
@@ -98,13 +109,28 @@ exports.triggerAlert = async (req, res) => {
 
         const typePrefix = requiredSpecialization || 'Unknown';
         
+        let targetHospital = null;
+        if (hospitalId) {
+            targetHospital = await prisma.hospital.findUnique({ where: { id: parseInt(hospitalId) } });
+        }
+        if (!targetHospital && hospitalName) {
+            targetHospital = await prisma.hospital.findFirst({
+                where: { name: { contains: hospitalName, mode: 'insensitive' } }
+            });
+        }
+        if (!targetHospital) {
+            targetHospital = await prisma.hospital.findFirst();
+        }
+
+        const chosenHospitalName = targetHospital ? targetHospital.name : (hospitalName || landmark || 'City General Hospital');
+
         let alertDescription = '';
         if (locationType === 'Building') {
-            alertDescription = `${typePrefix} | Building/Hospital: ${landmark || 'N/A'}, Floor: ${floor || 'N/A'}, Room: ${roomNumber || 'N/A'}`;
+            alertDescription = `${typePrefix} | Hospital: ${chosenHospitalName}, Floor: ${floor || 'N/A'}, Room: ${roomNumber || 'N/A'}`;
         } else if (locationType === 'Outside') {
-            alertDescription = `${typePrefix} | Outside/Home - Landmark: ${landmark || 'N/A'}`;
+            alertDescription = `${typePrefix} | Outdoor SOS (Facility: ${chosenHospitalName}) - Landmark: ${landmark || 'N/A'}`;
         } else {
-            alertDescription = `${typePrefix} | Floor ${floor || 'N/A'}, Room ${roomNumber || 'N/A'}`; // Fallback for old apps
+            alertDescription = `${typePrefix} | Hospital: ${chosenHospitalName}, Floor ${floor || 'N/A'}, Room ${roomNumber || 'N/A'}`;
         }
 
         // Create the EmergencyAlert and DispatchRecord
@@ -121,7 +147,8 @@ exports.triggerAlert = async (req, res) => {
         await prisma.dispatchRecord.create({
             data: {
                 alertId: newAlert.id,
-                doctorId: closestDoctor.id
+                doctorId: closestDoctor.id,
+                hospitalId: targetHospital ? targetHospital.id : null
             }
         });
 
@@ -160,7 +187,8 @@ exports.getAlertStatus = async (req, res) => {
             where: { alertId: parseInt(id) },
             include: {
                 alert: { include: { patient: true } },
-                doctor: true
+                doctor: true,
+                hospital: true
             }
         });
 
@@ -182,6 +210,9 @@ exports.getAlertStatus = async (req, res) => {
                 doctorname: dispatch.doctor ? dispatch.doctor.fullName : 'N/A',
                 doctorphone: dispatch.doctor ? dispatch.doctor.phoneNumber : 'N/A',
                 specialization: dispatch.doctor ? dispatch.doctor.specialization : 'N/A',
+                hospitalName: dispatch.hospital ? dispatch.hospital.name : null,
+                hospitalAddress: dispatch.hospital ? dispatch.hospital.address : null,
+                hospitalContact: dispatch.hospital ? dispatch.hospital.contactNumber : null,
                 distanceFormatted,
                 description: dispatch.alert.description,
                 latitude: dispatch.alert.latitude,
@@ -207,13 +238,17 @@ exports.getDoctorAlerts = async (req, res) => {
                 doctorId: docProfile.id,
                 alert: { status: { in: ['PENDING', 'DISPATCHED'] } }
             },
-            include: { alert: { include: { patient: true } } },
+            include: { 
+                alert: { include: { patient: true } },
+                hospital: true
+            },
             orderBy: { dispatchedAt: 'desc' }
         });
 
         const mappedAlerts = dispatches.map(d => ({
             alertid: d.alert.id,
             description: d.alert.description,
+            hospitalName: d.hospital?.name || null,
             status: d.alert.status,
             latitude: d.alert.latitude,
             longitude: d.alert.longitude,
@@ -288,7 +323,7 @@ exports.getPatientActiveAlert = async (req, res) => {
                 status: { in: ['PENDING', 'DISPATCHED'] }
             },
             orderBy: { createdAt: 'desc' },
-            include: { dispatchRecord: { include: { doctor: true } } }
+            include: { dispatchRecord: { include: { doctor: true, hospital: true } } }
         });
 
         if (!activeAlert) {
@@ -304,6 +339,8 @@ exports.getPatientActiveAlert = async (req, res) => {
                 doctorname: dispatch?.doctor ? dispatch.doctor.fullName : 'N/A',
                 doctorphone: dispatch?.doctor ? dispatch.doctor.phoneNumber : 'N/A',
                 specialization: dispatch?.doctor ? dispatch.doctor.specialization : 'N/A',
+                hospitalName: dispatch?.hospital ? dispatch.hospital.name : null,
+                hospitalAddress: dispatch?.hospital ? dispatch.hospital.address : null,
                 description: activeAlert.description,
                 latitude: activeAlert.latitude,
                 longitude: activeAlert.longitude,
