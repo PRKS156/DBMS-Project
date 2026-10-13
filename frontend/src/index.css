@@ -324,6 +324,9 @@ tbody tr:hover{background:#f7fbfa}
   width: 100% !important;
   background: #0a1214;
 }
+.track-map-container .leaflet-tile {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
 
 /* Loading state */
 .map-loading {
