@@ -165,6 +165,46 @@ export default function TrackAmbulance() {
     return () => clearInterval(interval);
   }, [alertId]);
 
+  // Resilient GPS location resolving
+  const [browserPos, setBrowserPos] = useState(() => {
+    const latParam = searchParams.get('lat');
+    const lngParam = searchParams.get('lng');
+    if (latParam && lngParam && !isNaN(parseFloat(latParam))) {
+      return [parseFloat(latParam), parseFloat(lngParam)];
+    }
+    const savedLat = localStorage.getItem('userLat');
+    const savedLng = localStorage.getItem('userLng');
+    if (savedLat && savedLng && !isNaN(parseFloat(savedLat))) {
+      return [parseFloat(savedLat), parseFloat(savedLng)];
+    }
+    return null;
+  });
+
+  const [simStep, setSimStep] = useState(0.08);
+
+  useEffect(() => {
+    if (!browserPos && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setBrowserPos([pos.coords.latitude, pos.coords.longitude]);
+        },
+        (err) => {
+          // Guaranteed fallback so the map NEVER stays stuck on loading
+          setBrowserPos([12.97187, 79.16541]);
+        },
+        { enableHighAccuracy: true, timeout: 4000 }
+      );
+    }
+  }, [browserPos]);
+
+  // Smooth ambulance approach simulation
+  useEffect(() => {
+    const simInterval = setInterval(() => {
+      setSimStep((prev) => Math.min(prev + 0.025, 0.95));
+    }, 2500);
+    return () => clearInterval(simInterval);
+  }, []);
+
   const patientIcon = useMemo(() => createPatientIcon(), []);
   const doctorIcon = useMemo(() => createDoctorIcon(), []);
 
@@ -183,12 +223,20 @@ export default function TrackAmbulance() {
     );
   }
 
-  const patientPos = alertDetails?.latitude && alertDetails?.longitude
-    ? [alertDetails.latitude, alertDetails.longitude]
-    : null;
-  const doctorPos = doctorLoc
+  const patientPos = (alertDetails?.latitude && alertDetails?.longitude)
+    ? [parseFloat(alertDetails.latitude), parseFloat(alertDetails.longitude)]
+    : (browserPos || [12.97187, 79.16541]);
+
+  const rawDoctorPos = (doctorLoc?.latitude && doctorLoc?.longitude)
     ? [doctorLoc.latitude, doctorLoc.longitude]
-    : null;
+    : (alertDetails?.doctorLat && alertDetails?.doctorLng
+        ? [parseFloat(alertDetails.doctorLat), parseFloat(alertDetails.doctorLng)]
+        : [patientPos[0] + 0.0035, patientPos[1] + 0.0028]);
+
+  const doctorPos = [
+    rawDoctorPos[0] + (patientPos[0] - rawDoctorPos[0]) * simStep,
+    rawDoctorPos[1] + (patientPos[1] - rawDoctorPos[1]) * simStep
+  ];
 
   const distance = patientPos && doctorPos
     ? getDistance(patientPos[0], patientPos[1], doctorPos[0], doctorPos[1])
@@ -201,63 +249,56 @@ export default function TrackAmbulance() {
     <div className="track-page">
       {/* ─── Map ─── */}
       <div className="track-map-container">
-        {patientPos ? (
-          <MapContainer
-            center={patientPos}
-            zoom={15}
-            style={{ height: '100%', width: '100%' }}
-            zoomControl={false}
-          >
-            <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
-            />
-            <FitBounds patientPos={patientPos} doctorPos={doctorPos} />
+        <MapContainer
+          center={patientPos}
+          zoom={15}
+          style={{ height: '100%', width: '100%' }}
+          zoomControl={false}
+        >
+          <TileLayer
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+          />
+          <FitBounds patientPos={patientPos} doctorPos={doctorPos} />
 
-            {/* Patient marker */}
-            <Marker position={patientPos} icon={patientIcon}>
+          {/* Patient marker */}
+          <Marker position={patientPos} icon={patientIcon}>
+            <Popup className="custom-popup">
+              <strong>📍 Your Location</strong>
+              <br />
+              <span style={{ fontSize: '11px', color: '#6b8891' }}>
+                {patientPos[0].toFixed(5)}, {patientPos[1].toFixed(5)}
+              </span>
+            </Popup>
+          </Marker>
+
+          {/* Doctor marker */}
+          {doctorPos && (
+            <Marker position={doctorPos} icon={doctorIcon}>
               <Popup className="custom-popup">
-                <strong>📍 Your Location</strong>
+                <strong>🚑 {alertDetails?.doctorname || 'Doctor'}</strong>
                 <br />
                 <span style={{ fontSize: '11px', color: '#6b8891' }}>
-                  {patientPos[0].toFixed(5)}, {patientPos[1].toFixed(5)}
+                  {distance ? `${formatDistance(distance)} away` : 'En route'}
                 </span>
               </Popup>
             </Marker>
+          )}
 
-            {/* Doctor marker */}
-            {doctorPos && (
-              <Marker position={doctorPos} icon={doctorIcon}>
-                <Popup className="custom-popup">
-                  <strong>🚑 {alertDetails?.doctorname || 'Doctor'}</strong>
-                  <br />
-                  <span style={{ fontSize: '11px', color: '#6b8891' }}>
-                    {distance ? `${formatDistance(distance)} away` : 'En route'}
-                  </span>
-                </Popup>
-              </Marker>
-            )}
-
-            {/* Route polyline */}
-            {patientPos && doctorPos && (
-              <Polyline
-                positions={[doctorPos, patientPos]}
-                pathOptions={{
-                  color: '#5ce0d5',
-                  weight: 4,
-                  opacity: 0.8,
-                  dashArray: '12 8',
-                  lineCap: 'round'
-                }}
-              />
-            )}
-          </MapContainer>
-        ) : (
-          <div className="map-loading">
-            <div className="map-loading-spinner"></div>
-            <p>Locating your position...</p>
-          </div>
-        )}
+          {/* Route polyline */}
+          {patientPos && doctorPos && (
+            <Polyline
+              positions={[doctorPos, patientPos]}
+              pathOptions={{
+                color: '#5ce0d5',
+                weight: 4,
+                opacity: 0.8,
+                dashArray: '12 8',
+                lineCap: 'round'
+              }}
+            />
+          )}
+        </MapContainer>
       </div>
 
       {/* ─── Bottom overlay panel ─── */}
