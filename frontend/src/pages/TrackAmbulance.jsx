@@ -125,6 +125,13 @@ export default function TrackAmbulance() {
     socketRef.current.on('alertUpdate', (data) => {
       if (data.status === 'DISPATCHED') {
         setAlertDetails((prev) => (prev ? { ...prev, status: 'DISPATCHED' } : prev));
+      } else if (data.status === 'TRANSPORTING') {
+        setAlertDetails((prev) => (prev ? { ...prev, status: 'TRANSPORTING' } : prev));
+      } else if (data.status === 'COMPLETED') {
+        setAlertDetails((prev) => (prev ? { ...prev, status: 'COMPLETED' } : prev));
+      } else if (data.status === 'CANCELLED') {
+        alert('This emergency was cancelled: ' + (data.reason || 'Cancelled'));
+        navigate('/patient-dashboard');
       }
     });
 
@@ -327,13 +334,15 @@ export default function TrackAmbulance() {
       <div className="track-overlay">
         {/* Status indicator */}
         <div className="track-status-bar">
-          <div className={`track-status-dot ${alertDetails?.status === 'DISPATCHED' ? 'confirmed' : 'pending'}`}></div>
+          <div className={`track-status-dot ${alertDetails?.status === 'TRANSPORTING' ? 'transporting' : (alertDetails?.status === 'DISPATCHED' ? 'confirmed' : 'pending')}`}></div>
           <span className="track-status-text">
-            {alertDetails?.status === 'DISPATCHED'
-              ? (isAdmitted
-                  ? 'Doctor confirmed — heading directly to your ward on foot'
-                  : (doctorPos ? 'Doctor confirmed — heading to you now' : 'Doctor confirmed — acquiring doctor GPS...'))
-              : 'Finding nearest doctor...'}
+            {alertDetails?.status === 'TRANSPORTING'
+              ? `🚑 Patient secured — En route to ${alertDetails?.hospitalName || 'hospital'} with medical team`
+              : (alertDetails?.status === 'DISPATCHED'
+                  ? (isAdmitted
+                      ? 'Doctor confirmed — heading directly to your ward on foot'
+                      : (doctorPos ? 'Doctor confirmed — heading to you now' : 'Doctor confirmed — acquiring doctor GPS...'))
+                  : 'Finding nearest doctor...')}
           </span>
         </div>
 
@@ -349,6 +358,11 @@ export default function TrackAmbulance() {
             <div className="track-doctor-info">
               <h3>Dr. {alertDetails.doctorname}</h3>
               <span>{alertDetails.specialization}</span>
+              {alertDetails.isFallback && (
+                <div style={{ marginTop: '4px', padding: '3px 8px', borderRadius: '4px', background: '#fef3c7', color: '#92400e', fontSize: '11px', fontWeight: '600' }}>
+                  ⚠️ Specialist Fallback: Closest Emergency Physician
+                </div>
+              )}
               {alertDetails.hospitalName && (
                 <span style={{ display: 'block', fontSize: '12px', color: '#5eead4', marginTop: '3px', fontWeight: '500' }}>
                   🏥 {alertDetails.hospitalName}
@@ -397,9 +411,31 @@ export default function TrackAmbulance() {
         </div>
 
         {/* Actions */}
-        <div className="track-actions">
-          <button className="btn navy track-back-btn" onClick={() => navigate('/patient-dashboard')}>
+        <div className="track-actions" style={{ display: 'flex', gap: '10px' }}>
+          <button className="btn navy track-back-btn" style={{ flex: 1 }} onClick={() => navigate('/patient-dashboard')}>
             ← Back to Dashboard
+          </button>
+          <button
+            className="btn"
+            style={{ flex: 1, background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
+            onClick={async () => {
+              if (window.confirm("Are you sure you want to cancel this emergency request? Dispatched medical personnel and vehicle will be immediately released back to duty.")) {
+                try {
+                  await fetch(`${API_BASE}/api/alerts/${alertId}/cancel`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'Cancelled by patient from live tracking screen' })
+                  });
+                  alert('Emergency cancelled.');
+                  navigate('/patient-dashboard');
+                } catch(e) {
+                  console.error(e);
+                  navigate('/patient-dashboard');
+                }
+              }
+            }}
+          >
+            ❌ Cancel SOS
           </button>
         </div>
       </div>

@@ -102,8 +102,14 @@ export default function Dashboard() {
       socketRef.current.on('alertUpdate', (data) => {
         if (data.status === 'DISPATCHED') {
           setActiveAlertDetails(prev => prev ? { ...prev, status: 'DISPATCHED' } : prev);
+        } else if (data.status === 'TRANSPORTING') {
+          setActiveAlertDetails(prev => prev ? { ...prev, status: 'TRANSPORTING' } : prev);
         } else if (data.status === 'COMPLETED') {
           setActiveAlertDetails(prev => prev ? { ...prev, status: 'COMPLETED' } : prev);
+        } else if (data.status === 'CANCELLED') {
+          alert('Alert was cancelled: ' + (data.reason || 'Cancelled'));
+          setActiveAlertId(null);
+          setActiveAlertDetails(null);
         }
       });
 
@@ -241,6 +247,44 @@ export default function Dashboard() {
     } catch (err) {
       console.error(err);
       setDoctorAlerts(prev => prev.filter(a => a.alertid !== alertId));
+    }
+  };
+
+  const startTransport = async (alertId) => {
+    try {
+      setDoctorAlerts(prev => prev.map(a => a.alertid === alertId ? { ...a, status: 'TRANSPORTING' } : a));
+      await fetch(`${API_BASE}/api/alerts/${alertId}/transport`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      fetchDoctorAlerts();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const cancelEmergencyAlert = async (alertId) => {
+    if (!window.confirm("Are you sure you want to cancel this emergency request? Responding medical personnel and vehicle will be immediately released back to duty.")) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/alerts/${alertId}/cancel`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Cancelled by patient from dashboard' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert("Emergency cancelled successfully. Units have been released back to active duty.");
+        setActiveAlertId(null);
+        setActiveAlertDetails(null);
+        setSuccess('');
+      } else {
+        alert(data.message || "Failed to cancel emergency.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Network error cancelling emergency.");
     }
   };
 
@@ -563,17 +607,51 @@ export default function Dashboard() {
                         );
                       })()}
 
+                      {/* Specialist Fallback Alert Banner */}
+                      {alert.isFallback && (
+                        <div style={{ margin: '8px 0', padding: '10px 14px', borderRadius: '8px', background: '#fef3c7', border: '1px solid #f59e0b', color: '#92400e', fontSize: '0.88rem' }}>
+                          <strong>⚠️ Specialist Fallback Notice:</strong> {alert.fallbackReason || 'Dispatched as closest physician for immediate stabilization.'}
+                        </div>
+                      )}
+
                       {/* Action Buttons */}
-                      <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
                         {alert.status === 'PENDING' && (
-                          <button className="btn teal" style={{ flex: 1 }} onClick={() => acknowledgeAlert(alert.alertid)}>
+                          <button className="btn teal" style={{ width: '100%' }} onClick={() => acknowledgeAlert(alert.alertid)}>
                             🚨 Accept & Start En Route
                           </button>
                         )}
                         {alert.status === 'DISPATCHED' && (
-                          <button className="btn" style={{ flex: 1, background: '#10b981', color: '#fff', border: 'none' }} onClick={() => completeAlert(alert.alertid)}>
-                            ✅ Mark Arrived / Complete Mission
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              className="btn"
+                              style={{ flex: 1, background: '#f59e0b', color: '#fff', border: 'none' }}
+                              onClick={() => startTransport(alert.alertid)}
+                            >
+                              🚑 Patient Secured — En Route to Hospital
+                            </button>
+                            <button
+                              className="btn"
+                              style={{ flex: 1, background: '#10b981', color: '#fff', border: 'none' }}
+                              onClick={() => completeAlert(alert.alertid)}
+                            >
+                              ✅ Resolved On Scene
+                            </button>
+                          </div>
+                        )}
+                        {alert.status === 'TRANSPORTING' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <div style={{ padding: '8px 12px', background: '#0284c7', color: '#fff', borderRadius: '6px', fontSize: '0.85rem', textAlign: 'center', fontWeight: '600' }}>
+                              🚑 En Route to {alert.hospitalName || 'Emergency Ward'} — Vitals Monitored
+                            </div>
+                            <button
+                              className="btn"
+                              style={{ width: '100%', background: '#10b981', color: '#fff', border: 'none' }}
+                              onClick={() => completeAlert(alert.alertid)}
+                            >
+                              🏥 Patient Handed Over at Hospital (Complete Mission)
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -797,16 +875,38 @@ export default function Dashboard() {
                 );
               })()}
 
-              <div style={{ marginTop: '15px', padding: '12px', borderRadius: '8px', backgroundColor: activeAlertDetails.status === 'PENDING' ? '#fff3cd' : '#d4edda', color: '#0f2a31' }}>
+              {/* Fallback Notice for Patient */}
+              {activeAlertDetails.isFallback && (
+                <div style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '8px', background: '#fef3c7', border: '1px solid #f59e0b', color: '#92400e', fontSize: '0.88rem' }}>
+                  <strong>ℹ️ Clinical Response Note:</strong> {activeAlertDetails.fallbackReason || 'Dispatched closest emergency physician for immediate stabilization.'}
+                </div>
+              )}
+
+              <div style={{ marginTop: '15px', padding: '12px', borderRadius: '8px', backgroundColor: activeAlertDetails.status === 'PENDING' ? '#fff3cd' : (activeAlertDetails.status === 'TRANSPORTING' ? '#e0f2fe' : '#d4edda'), color: '#0f2a31' }}>
                 <strong>Status: </strong>
-                {activeAlertDetails.status === 'PENDING' 
-                  ? 'We have found a doctor. Waiting for them to confirm...' 
-                  : '✅ The doctor has confirmed and is heading to your location right now!'}
+                {activeAlertDetails.status === 'PENDING' && 'We have found a doctor. Waiting for them to confirm...'}
+                {activeAlertDetails.status === 'DISPATCHED' && '✅ The doctor has confirmed and is heading to your location right now!'}
+                {activeAlertDetails.status === 'TRANSPORTING' && `🚑 Patient secured! En route to ${activeAlertDetails.hospitalName || 'network hospital'}. Emergency medical team accompanying.`}
               </div>
               <button className="btn teal" style={{marginTop: '16px', width: '100%'}} onClick={() => navigate(`/track-ambulance?alertId=${activeAlertId}`)}>
                 <span aria-hidden="true">📍</span> Open Full-Screen Live Tracking
               </button>
-              <button className="btn plain" style={{marginTop: '10px', width: '100%', textAlign: 'center', color: '#0f2a31'}} onClick={() => {setActiveAlertId(null); setActiveAlertDetails(null); setSuccess('');}}>Dismiss / Conclude Emergency</button>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button
+                  className="btn"
+                  style={{ flex: 1, background: '#fee2e2', border: '1px solid #ef4444', color: '#b91c1c' }}
+                  onClick={() => cancelEmergencyAlert(activeAlertId)}
+                >
+                  ❌ Cancel SOS Alert
+                </button>
+                <button
+                  className="btn plain"
+                  style={{ flex: 1, textAlign: 'center', color: '#0f2a31' }}
+                  onClick={() => { setActiveAlertId(null); setActiveAlertDetails(null); setSuccess(''); }}
+                >
+                  Dismiss from View
+                </button>
+              </div>
             </div>
           )
         ) : (
@@ -894,6 +994,14 @@ export default function Dashboard() {
             <button className="btn red" type="button" onClick={handleEmergencySubmit} disabled={loading}>
               {loading ? 'Sending...' : 'Send for help now'} <span aria-hidden="true">→</span>
             </button>
+
+            {/* Privacy and Regulatory Compliance Notice (Items 8, 18, 19) */}
+            <div style={{ marginTop: '14px', padding: '10px 12px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#64748b', lineHeight: '1.4' }}>
+              <strong>🛡️ Privacy & Emergency Medical Compliance (HIPAA / GDPR Triage Exemption):</strong>
+              <div style={{ marginTop: '4px' }}>
+                By triggering this emergency alert, you authorize the secure relay of your live GPS telemetry and vital triage profile solely to the assigned response unit. All SOS dispatches are rate-limited and logged in a protected medical audit ledger.
+              </div>
+            </div>
             {error && <div className="result error" style={{display:'block', marginTop: '15px'}}>{error}</div>}
             {success && <div className="result success" style={{display:'block', marginTop: '15px'}}>{success}</div>}
           </>

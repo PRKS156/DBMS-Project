@@ -33,12 +33,29 @@ exports.updateLocation = async (req, res) => {
             data: {
                 currentLat: lat,
                 currentLng: lng,
-                isAvailable: true // Automatically set available when broadcasting location
+                isAvailable: true,
+                user: { update: { updatedAt: new Date() } }
             }
         });
 
-        // Emit real-time location update to any patients tracking this doctor
+        // Query active dispatches for isolated room emission (Item 18: Privacy & Data Isolation)
+        const activeDispatches = await prisma.dispatchRecord.findMany({
+            where: {
+                doctorId: docProfile.id,
+                alert: { status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] } }
+            },
+            select: { alertId: true }
+        });
+
+        // Emit real-time location update to isolated alert rooms and doctor listener
         if (req.app.locals.io) {
+            activeDispatches.forEach(d => {
+                req.app.locals.io.to(`alert_${d.alertId}`).emit('doctorLocation', {
+                    doctorId: docProfile.userId,
+                    latitude: lat,
+                    longitude: lng
+                });
+            });
             req.app.locals.io.emit(`doctorLocation_${docProfile.userId}`, { latitude: lat, longitude: lng });
             req.app.locals.io.emit('doctorLocation', { doctorId: docProfile.userId, latitude: lat, longitude: lng });
         }

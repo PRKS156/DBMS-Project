@@ -2,67 +2,94 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🚀 Starting advanced database setup for PDF requirements...');
+  console.log('🚀 Starting advanced database setup for MedRelay...');
 
-  // 1. Create a View
-  console.log('Creating ActiveEmergenciesView...');
+  // 0. Ensure AlertStatus enum supports TRANSPORTING lifecycle stage
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TYPE "AlertStatus" ADD VALUE IF NOT EXISTS 'TRANSPORTING';`);
+  } catch (err) {
+    console.log('Enum value notice:', err.message);
+  }
+
+  // 1. Fix Item 14: View for ALL truly active emergencies (PENDING, DISPATCHED, TRANSPORTING)
+  console.log('Creating ActiveEmergenciesView covering all active alert states...');
   await prisma.$executeRawUnsafe(`
     CREATE OR REPLACE VIEW "ActiveEmergenciesView" AS
-    SELECT id, "patientId", latitude, longitude, status, description, "createdAt"
+    SELECT id, "patientId", latitude, longitude, status, description, "createdAt", "updatedAt"
     FROM "EmergencyAlert"
-    WHERE status = 'PENDING';
+    WHERE status IN ('PENDING', 'DISPATCHED', 'TRANSPORTING');
   `);
 
-  // 2. Create a Stored Procedure
-  // This procedure could be used to clean up or archive alerts, here we just make a simple one that logs or updates status.
-  console.log('Creating Stored Procedure archive_completed_alerts...');
+  // 2. Fix Item 16: True Archival Table and Stored Procedure (preserves medical records for compliance)
+  console.log('Creating EmergencyAlertArchive table and archival procedure...');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "EmergencyAlertArchive" (
+      "id" INT PRIMARY KEY,
+      "patientId" INT,
+      "latitude" DOUBLE PRECISION,
+      "longitude" DOUBLE PRECISION,
+      "status" VARCHAR(50),
+      "description" TEXT,
+      "createdAt" TIMESTAMP,
+      "archivedAt" TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
   await prisma.$executeRawUnsafe(`
     CREATE OR REPLACE PROCEDURE archive_completed_alerts()
     LANGUAGE plpgsql
     AS $$
     BEGIN
-      -- Move COMPLETED alerts older than 30 days to a hypothetical archive or just update a flag.
-      -- Since we don't have an archive table, we'll just demonstrate the procedure by updating the description
-      UPDATE "EmergencyAlert"
-      SET description = description || ' [ARCHIVED]'
-      WHERE status = 'COMPLETED' AND "updatedAt" < NOW() - INTERVAL '30 days';
-      
-      COMMIT;
+      -- Copy completed emergencies older than 30 days to archival table for long-term clinical audit compliance
+      INSERT INTO "EmergencyAlertArchive" ("id", "patientId", "latitude", "longitude", "status", "description", "createdAt")
+      SELECT id, "patientId", latitude, longitude, status, description, "createdAt"
+      FROM "EmergencyAlert"
+      WHERE status = 'COMPLETED' AND "updatedAt" < NOW() - INTERVAL '30 days'
+      ON CONFLICT ("id") DO NOTHING;
     END;
     $$;
   `);
 
-  // 3. Create a Trigger Function and Trigger
-  console.log('Creating Trigger update_alert_timestamp...');
-  
-  // First, the trigger function
+  // 3. Fix Item 15: Meaningful Status Audit Trigger (avoids Prisma @updatedAt redundancy)
+  console.log('Creating AlertStatusAudit table and real-time status change audit trigger...');
   await prisma.$executeRawUnsafe(`
-    CREATE OR REPLACE FUNCTION update_timestamp_func()
+    CREATE TABLE IF NOT EXISTS "AlertStatusAudit" (
+      "auditId" SERIAL PRIMARY KEY,
+      "alertId" INT NOT NULL,
+      "oldStatus" VARCHAR(50),
+      "newStatus" VARCHAR(50),
+      "changedAt" TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE OR REPLACE FUNCTION log_alert_status_transition()
     RETURNS TRIGGER AS $$
     BEGIN
-      NEW."updatedAt" = NOW();
+      IF (OLD.status IS DISTINCT FROM NEW.status) THEN
+        INSERT INTO "AlertStatusAudit" ("alertId", "oldStatus", "newStatus", "changedAt")
+        VALUES (NEW.id, OLD.status, NEW.status, NOW());
+      END IF;
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
   `);
 
-  // Second, the trigger itself. We drop it first if it exists to avoid errors.
-  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_update_timestamp ON "EmergencyAlert";`);
-  
+  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_log_alert_status ON "EmergencyAlert";`);
+
   await prisma.$executeRawUnsafe(`
-    CREATE TRIGGER trg_update_timestamp
-    BEFORE UPDATE ON "EmergencyAlert"
+    CREATE TRIGGER trg_log_alert_status
+    AFTER UPDATE ON "EmergencyAlert"
     FOR EACH ROW
-    EXECUTE FUNCTION update_timestamp_func();
+    EXECUTE FUNCTION log_alert_status_transition();
   `);
 
-  console.log('✅ Successfully created View, Stored Procedure, and Trigger in Supabase!');
+  console.log('✅ Successfully created View, Archive Stored Procedure, and Audit Trigger in PostgreSQL!');
 }
 
 main()
   .catch(e => {
-    console.error('❌ Error during setup:', e);
-    process.exit(1);
+    console.error('❌ Error during advanced DB setup:', e.message);
   })
   .finally(async () => {
     await prisma.$disconnect();

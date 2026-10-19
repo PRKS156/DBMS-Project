@@ -1,26 +1,58 @@
 # MedRelay — Emergency Response and Healthcare Dispatch System
 
-MedRelay is an integrated healthcare dispatch and emergency response platform built on a normalized relational database (PostgreSQL via Prisma ORM), real-time WebSockets (Socket.io), and geospatial tracking (Leaflet). It connects patients and bystanders with the nearest qualified clinician through proximity-based matching using the Haversine formula.
+MedRelay is an integrated healthcare dispatch and emergency response platform built on a normalized relational database (PostgreSQL via Prisma ORM), real-time WebSockets (Socket.io), and geospatial tracking (Leaflet). It connects patients and bystanders with the nearest qualified clinician and emergency vehicle through proximity-based matching, intelligent triage thresholds, atomic resource locking, and hospital transport lifecycle tracking.
 
 ---
 
-## 🚀 Features
+## 🚀 Key Features & Capabilities
 
-- **🆘 One-Tap Bystander SOS:** Emergency dispatch directly from the homepage using browser GPS coordinates without requiring prior registration.
-- **📍 Proximity-Based Clinician Matching:** Calculates spherical distance using the Haversine formula and prioritizes relevant specialties (e.g., Cardiology, Trauma Surgery).
-- **🩺 Real-Time Doctor Dispatch & Live Tracking:** Live Leaflet mapping with dynamic polyline route tracking, custom SVG markers, and real-time Socket.io state synchronization.
-- **🏥 Inpatient & Field Response:** Supports both street-level outdoor emergency alerts and indoor hospital ward/floor dispatches.
-- **📊 Administrative Analytics Dashboard:** High-level metrics, system KPIs, emergency type breakdowns (Pie charts), and incident area hotspots (Bar charts) powered by Recharts.
-- **⭐ Post-Emergency Feedback Loop:** Quality assurance rating (1–5 stars) and comments logged directly into the database.
-- **🌓 Adaptive Theme:** Modern aesthetic UI with full light and dark mode support.
+- **🆘 One-Tap Bystander SOS & Rate-Limited Dispatch:** Emergency dispatch directly from the homepage using browser GPS coordinates with IP sliding-window rate limiting to prevent spam and denial of service.
+- **📍 Proximity Pre-Filter & Road-Network Navigation:** Computes spherical distance using the Haversine formula as a low-latency spatial candidate filter, coupled with Google Maps turn-by-turn road navigation deep-links to route around physical barriers (rivers, one-way systems, traffic).
+- **🩺 Specialist Safeguards & Explicit Fallback:** Specialization triage (Cardiology, Trauma, Pediatrics, Orthopedics) with a 15 km safe distance ceiling and a 3x proximity ratio cutoff. If a specialist is dangerously far, the system dispatches the closest emergency physician and alerts both patient and doctor of the fallback justification.
+- **🔒 Race-Condition Elimination via Atomic Transactions:** Doctor availability locking (`isAvailable = false`), emergency vehicle reservation, and alert generation are wrapped in a single database transaction (`prisma.$transaction`), preventing concurrent double-booking.
+- **🚑 Full Response & Hospital Transport Lifecycle:** 
+  `PENDING` ➔ `DISPATCHED` (Physician & Ambulance en route) ➔ `TRANSPORTING` (Patient secured; en route to hospital ER) ➔ `COMPLETED` (Clinical handover at hospital). Includes a complete `CANCELLED` flow that immediately releases locked personnel and vehicles.
+- **🏥 Inpatient Ward vs. Field Dispatch:** Automatically differentiates between outdoor field emergencies (dispatching street ambulance + mobile doctor) and admitted inpatient ward calls (direct on-foot response with floor/bed details and zero vehicle locking).
+- **📡 Isolated Real-Time WebSockets:** Targeted Socket.io rooms (`alert_${id}`) isolate patient medical context (blood group, allergies, contact) and doctor GPS streams to only authorized participants.
+- **⏳ GPS Heartbeat & Telemetry Freshness:** 30-minute stale location cutoff (`STALE_TIMEOUT_MS`) prioritizes clinicians with active, recent GPS broadcasts over unresponsive units.
+- **📊 Administrative Analytics & Audit Retention:** Recharts-powered analytics for emergency distribution and response times. Patient deletion performs GDPR/HIPAA-compliant PII redaction while preserving historical dispatch rows and timestamps for clinical audit trails.
+
+---
+
+## 🏛️ Advanced Database Concepts (PostgreSQL)
+
+MedRelay incorporates specialized database objects directly inside PostgreSQL to ensure auditability, performance, and referential integrity:
+
+1. **`ActiveEmergenciesView` (Database View):**
+   ```sql
+   CREATE OR REPLACE VIEW "ActiveEmergenciesView" AS
+   SELECT a.id AS "alertId", a.status, a.latitude, a.longitude, a.description, a."createdAt",
+          p."fullName" AS "patientName", p."phoneNumber" AS "patientPhone", p."bloodGroup",
+          d."id" AS "dispatchId", doc."fullName" AS "doctorName", doc."specialization",
+          h."name" AS "hospitalName", v."licensePlate" AS "vehiclePlate"
+   FROM "EmergencyAlert" a
+   LEFT JOIN "PatientProfile" p ON a."patientId" = p.id
+   LEFT JOIN "DispatchRecord" d ON a.id = d."alertId"
+   LEFT JOIN "DoctorProfile" doc ON d."doctorId" = doc.id
+   LEFT JOIN "Hospital" h ON d."hospitalId" = h.id
+   LEFT JOIN "Vehicle" v ON d."vehicleId" = v.id
+   WHERE a.status IN ('PENDING', 'DISPATCHED', 'TRANSPORTING');
+   ```
+   Aggregates all active, unresolved alerts across 5 tables into an efficient virtual table for real-time dispatch dashboards.
+
+2. **`AlertStatusAudit` & `trg_log_alert_status` (Database Trigger):**
+   Fires `AFTER UPDATE OF status ON "EmergencyAlert"`, inserting `alertId`, `oldStatus`, `newStatus`, and server timestamp (`NOW()`) into an audit ledger for statutory healthcare compliance.
+
+3. **`EmergencyAlertArchive` & `archive_completed_alerts(retention_days)` (Stored Procedure):**
+   Copies resolved alerts older than the retention threshold (default 30 days) into the archive partition without destroying historical records.
 
 ---
 
 ## 🛠️ Technology Stack
 
 - **Frontend:** React 19, Vite, React Router 7, Leaflet, React-Leaflet, Recharts, Lucide Icons
-- **Backend:** Node.js 20, Express.js, Socket.io, JWT (`jsonwebtoken`), `bcryptjs`
-- **Database:** PostgreSQL (Supabase) with Prisma ORM
+- **Backend:** Node.js 20, Express.js, Socket.io, JWT (`jsonwebtoken`), `bcryptjs`, Prisma ORM
+- **Database:** PostgreSQL (Supabase) with ACID transactions, Views, Triggers, and Stored Procedures
 - **Deployment:** Vercel (Frontend SPA) & Render (Backend API + WebSockets)
 
 ---
@@ -29,37 +61,39 @@ MedRelay is an integrated healthcare dispatch and emergency response platform bu
 
 ```text
 ├── backend/
-│   ├── config/             # Database client (Prisma)
-│   ├── controllers/        # Request handlers (admin, alert, auth, doctor, patient)
-│   ├── db/                 # SQL schemas and seeds
-│   ├── prisma/             # schema.prisma relational definitions
-│   ├── routes/             # Express API routes
-│   ├── utils/              # Geodesic (Haversine) utilities
-│   ├── server.js           # Server entry point & Socket.io handler
+│   ├── config/             # Database client (Prisma Client instance)
+│   ├── controllers/        # Controllers (admin, alert, auth, doctor, patient)
+│   ├── middleware/         # JWT authentication & RBAC middleware
+│   ├── prisma/             # schema.prisma relational model definitions & seed.js
+│   ├── routes/             # Express API routes (admin, alert, auth, doctor, patient)
+│   ├── utils/              # Geodesic (Haversine) and distance formatting utilities
+│   ├── setup-advanced-db.js# Script provisioning Views, Triggers, and Stored Procedures
+│   ├── server.js           # Express application, Socket.io server & room management
 │   └── package.json
 ├── frontend/
 │   ├── src/
 │   │   ├── components/     # Layout, navigation, top bar
-│   │   ├── config/         # Centralized API & WebSocket endpoints
+│   │   ├── config/         # Centralized API & WebSocket endpoints (api.js)
 │   │   ├── pages/          # Home, PatientAccess, DoctorAccess, AdminAccess, Dashboard, TrackAmbulance
-│   │   ├── App.jsx         # App router
-│   │   └── index.css       # Custom design system tokens & theme styles
-│   ├── vercel.json         # Frontend Vercel rewrites
+│   │   ├── App.jsx         # App router configuration
+│   │   └── index.css       # Custom design system tokens, themes, and animations
+│   ├── vercel.json         # Frontend Vercel SPA routing rules
 │   └── package.json
-├── MedRelay_Final_Report.md # Full academic project report
-├── vercel.json             # Root Vercel SPA deployment configuration
+├── MedRelay_Final_Report.md# Comprehensive academic report addressing all 20 design criteria
+├── vercel.json             # Root deployment configuration
 └── README.md
 ```
 
 ---
 
-## ⚙️ Environment Variables
+## ⚙️ Environment Configuration
 
 ### Backend (`backend/.env`)
 ```ini
 PORT=3000
 DATABASE_URL="postgresql://user:password@host:5432/medrelay?schema=public"
 JWT_SECRET="your_jwt_secret_key"
+ADMIN_INITIAL_PASSWORD="SecureInitialPassword2026!"
 ```
 
 ### Frontend (`frontend/.env`)
@@ -72,11 +106,12 @@ VITE_SOCKET_URL=https://emergency-backend-3ppk.onrender.com
 
 ## 🚦 Getting Started
 
-### 1. Backend Setup
+### 1. Database & Backend Setup
 ```bash
 cd backend
 npm install
 npx prisma generate
+node setup-advanced-db.js  # Provisions PostgreSQL Views, Triggers, and Stored Procedures
 npm start
 ```
 
@@ -96,17 +131,31 @@ npm run build
 
 ## 📡 API Endpoints Summary
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/auth/register` | Register a new user (`PATIENT`, `DOCTOR`, `ADMIN`) |
-| `POST` | `/api/auth/login` | Authenticate user and receive JWT |
-| `POST` | `/api/alerts/trigger` | Trigger an emergency alert and auto-dispatch nearest doctor |
-| `GET` | `/api/alerts/:id/status` | Fetch real-time status of an alert |
-| `GET` | `/api/alerts/doctor/:doctorId` | List pending/dispatched alerts for a doctor |
-| `PATCH`| `/api/alerts/:id/acknowledge` | Doctor acknowledges dispatch (`DISPATCHED`) |
-| `PATCH`| `/api/alerts/:id/complete` | Complete emergency resolution (`COMPLETED`) |
-| `POST` | `/api/alerts/:id/feedback` | Submit post-dispatch rating & comments |
-| `PATCH`| `/api/doctors/:id/location` | Broadcast doctor's live GPS coordinates |
-| `PATCH`| `/api/doctors/:id/status` | Update doctor availability (on-duty / off-duty) |
-| `GET` | `/api/admin/data` | Fetch system directory and metrics |
-| `GET` | `/api/admin/analytics` | Fetch response time and case statistics |
+| Method | Endpoint | Role | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/auth/register` | Public | Register a new user (`PATIENT`, `DOCTOR`, `DISPATCHER`, `ADMIN`) |
+| `POST` | `/api/auth/login` | Public | Authenticate user and receive JWT bearer token |
+| `POST` | `/api/alerts/trigger` | Patient / Guest | Trigger SOS alert with atomic matching, distance fallback, and rate limit |
+| `GET` | `/api/alerts/:id/status` | Authenticated | Fetch real-time alert status, fallback notices, and vehicle details |
+| `GET` | `/api/alerts/doctor/:id` | Doctor | Fetch active pending/dispatched/transporting alerts assigned to a doctor |
+| `GET` | `/api/alerts/hospitals` | Public | List available network hospital facilities and emergency departments |
+| `GET` | `/api/alerts/patient/:id/active` | Patient | Restore active emergency state on page reload |
+| `PATCH`| `/api/alerts/:id/acknowledge`| Doctor | Doctor accepts alert (`DISPATCHED`) |
+| `PATCH`| `/api/alerts/:id/transport` | Doctor | Patient secured; transit to hospital begins (`TRANSPORTING`) |
+| `PATCH`| `/api/alerts/:id/complete` | Doctor | Clinical handover / resolution complete (`COMPLETED`) |
+| `PATCH`| `/api/alerts/:id/cancel` | Patient / Doctor | Cancel emergency; atomically release locked doctor and vehicle |
+| `POST` | `/api/alerts/:id/feedback` | Patient | Submit post-dispatch rating (1-5) and feedback notes |
+| `PATCH`| `/api/doctors/:id/location` | Doctor | Broadcast live GPS coordinates and refresh heartbeat |
+| `PATCH`| `/api/doctors/:id/status` | Doctor | Toggle availability (on-duty / off-duty) |
+| `GET` | `/api/admin/data` | Admin / Dispatcher | View clinicians, patients, and system KPIs |
+| `GET` | `/api/admin/analytics` | Admin / Dispatcher | Aggregated incident metrics, case distribution, and response times |
+| `DELETE`| `/api/admin/patients/:id`| Admin | Anonymize/redact patient PII while retaining audit rows |
+| `DELETE`| `/api/admin/doctors/:id` | Admin | Remove clinician account |
+
+---
+
+## 🛡️ Health Data Privacy & Emergency Consent (HIPAA / GDPR)
+
+- **Emergency Medical Exemption:** Emergency data sharing is conducted under statutory life-safety exemptions (HIPAA 45 CFR § 164.512(j) / GDPR Art. 9(2)(c)), sharing vital triage context solely with assigned clinicians.
+- **WebSocket Channel Isolation:** Patient contact information and clinician GPS coordinates are published exclusively into isolated alert rooms (`alert_${alertId}`).
+- **Right to Erasure & Audit Retention:** User deletion performs soft PII redaction (redacting full names, phone numbers, and unstructured clinical notes) while strictly preserving response timestamps and dispatch records in compliance with clinical record retention laws.

@@ -40,7 +40,8 @@ async function main() {
 
     // 3. Seed Default Administrator
     console.log('Seeding default administrator...');
-    const adminPassword = await bcrypt.hash('admin', 10);
+    const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'MedRelayAdmin2026!';
+    const adminPassword = await bcrypt.hash(initialPassword, 10);
     const adminUser = await prisma.user.upsert({
         where: { email: 'admin@vit.edu' },
         update: { password: adminPassword, role: 'ADMIN' },

@@ -112,58 +112,37 @@ exports.deletePatient = async (req, res) => {
         const userId = patProfile ? patProfile.userId : targetId;
         const patId = patProfile ? patProfile.id : null;
 
-        if (patId) {
-            // Find all emergency alerts for this patient
-            const alerts = await prisma.emergencyAlert.findMany({
-                where: { patientId: patId },
-                select: { id: true }
-            });
-            const alertIds = alerts.map(a => a.id);
-
-            if (alertIds.length > 0) {
-                // Find associated dispatch records
-                const dispatches = await prisma.dispatchRecord.findMany({
-                    where: { alertId: { in: alertIds } },
-                    select: { id: true }
-                });
-                const dispatchIds = dispatches.map(d => d.id);
-
-                if (dispatchIds.length > 0) {
-                    // Delete feedbacks associated with these dispatches
-                    await prisma.feedback.deleteMany({
-                        where: { dispatchRecordId: { in: dispatchIds } }
-                    });
-                    // Delete dispatch records
-                    await prisma.dispatchRecord.deleteMany({
-                        where: { id: { in: dispatchIds } }
-                    });
-                }
-
-                // Delete the alerts
-                await prisma.emergencyAlert.deleteMany({
-                    where: { id: { in: alertIds } }
-                });
-            }
-        }
-
-        // Delete feedbacks submitted by this user
-        await prisma.feedback.deleteMany({
-            where: { userId }
-        });
-
-        // Delete patient profile
         if (patProfile) {
-            await prisma.patientProfile.deleteMany({
-                where: { id: patProfile.id }
+            // Anonymize personal identifiable information (PII) to comply with data privacy (GDPR/HIPAA Right to Erasure)
+            // while preserving emergency dispatch records and response times for clinical audit compliance
+            await prisma.patientProfile.update({
+                where: { id: patProfile.id },
+                data: {
+                    fullName: 'Anonymized Patient (Account Removed)',
+                    phoneNumber: 'Redacted',
+                    medicalHistory: null,
+                    age: null,
+                    gender: null
+                }
             });
+
+            await prisma.user.update({
+                where: { id: userId },
+                data: {
+                    email: `redacted_user_${userId}_${Date.now()}@medrelay.privacy`,
+                    password: 'ACCOUNT_DEACTIVATED'
+                }
+            });
+
+            return res.status(200).json({ success: true, message: "Patient account PII removed and anonymized. Clinical dispatch history preserved for audit compliance." });
         }
 
-        // Delete user account
+        // If user has no patient profile, safe to remove user record
         await prisma.user.deleteMany({
             where: { id: userId }
         });
 
-        return res.status(200).json({ success: true, message: "Patient deleted successfully." });
+        return res.status(200).json({ success: true, message: "User account deleted." });
     } catch (error) {
         console.error("❌ Delete patient failed:", error);
         return res.status(500).json({ success: false, message: "Delete failed.", debug: error.message });

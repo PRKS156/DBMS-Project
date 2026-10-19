@@ -440,6 +440,7 @@ tbody tr:hover{background:#f7fbfa}
 }
 .track-status-dot.pending { background: #e0a641; box-shadow: 0 0 0 4px rgba(224, 150, 65, .2); }
 .track-status-dot.confirmed { background: #4ce595; box-shadow: 0 0 0 4px rgba(76, 229, 149, .2); }
+.track-status-dot.transporting { background: #38bdf8; box-shadow: 0 0 0 4px rgba(56, 189, 248, .35); }
 .track-status-text {
   color: #c1dad6;
   font-size: 12.5px;

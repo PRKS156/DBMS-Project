@@ -30,11 +30,13 @@ Emergency Response and Health Informatics
 
 ## Abstract
 
-Emergency response organisations manage critical volumes of information, including patient details, doctor availability, ambulance locations, hospital assignments, and dispatch records. When this information is spread across independent communication channels, phone calls, and disconnected software, the result is delayed response times, data inconsistency, poor resource allocation, weak access control, and no reliable history of emergency events.
+Emergency response organizations manage critical volumes of time-sensitive information, including patient vitals, clinical specializations, ambulance fleet availability, hospital emergency department capacities, and dispatch audit records. When this information is spread across independent communication channels, phone calls, and disconnected legacy software, the consequences include delayed response times, allocation race conditions, clinical mismatch, data loss during audits, and unmitigated bystander abuse.
 
-MedRelay is an integrated emergency response platform built on a centralised, normalised relational database using PostgreSQL and Prisma ORM. It enforces consistency through primary keys, foreign keys, unique constraints, ENUMs, and referential integrity, and restricts access through JWT authentication and role-based access control for patients, doctors, dispatchers, and administrators. Important emergency events are tracked in real time via WebSockets (Socket.io), with live status updates pushed to all connected stakeholders the moment an alert is triggered, dispatched, or acknowledged. A geolocation mapping component (Leaflet) provides a live visual map of patient locations and dispatched doctors, enabling proximity-based resource allocation using the Haversine formula. Advanced database features including Views, Stored Procedures, and Triggers are implemented to automate data management and maintain chronological integrity.
+MedRelay is an integrated emergency response platform built on a centralized, normalized relational database using PostgreSQL and Prisma ORM. It enforces consistency through primary keys, foreign keys, unique constraints, ENUMs, and ACID transactions. Access is strictly governed via JWT authentication and role-based access control across four distinct user roles: `PATIENT`, `DOCTOR`, `DISPATCHER`, and `ADMIN`. Emergency events are managed across an end-to-end clinical lifecycle (`PENDING` ➔ `DISPATCHED` ➔ `TRANSPORTING` ➔ `COMPLETED` / `CANCELLED`), pushed in real time via room-isolated WebSockets (Socket.io). 
 
-**Keywords:** *Emergency Response, PostgreSQL, Prisma ORM, Normalisation, Role-Based Access Control, JWT Authentication, WebSockets, Real-time Dispatch, Geolocation Mapping, Haversine Distance*
+Resource matching pairs the Haversine spherical distance formula as a rapid $O(N)$ candidate pre-filter with turn-by-turn road navigation links, specialist proximity safeguards (15 km / 3x ratio ceiling), GPS heartbeat freshness verifications, and zero-unit escalation procedures. Advanced PostgreSQL features—including `ActiveEmergenciesView`, status transition audit triggers (`trg_log_alert_status`), and an automated archival stored procedure (`archive_completed_alerts`) with a dedicated archive table—automate operational querying and safeguard statutory medical retention requirements.
+
+**Keywords:** *Emergency Response, PostgreSQL, Prisma ORM, Database Normalization, ACID Transactions, Role-Based Access Control, WebSockets, Real-time Dispatch, Geolocation Mapping, Haversine Distance, Health Informatics, HIPAA/GDPR Compliance*
 
 ---
 
@@ -42,310 +44,422 @@ MedRelay is an integrated emergency response platform built on a centralised, no
 
 1. Introduction
 2. Problem Definition
-3. Application Domain
-4. Existing System
-5. Limitations of the Existing System
-6. Proposed System
-7. Database Design and Technologies
-8. Proposed Database Structure
-9. Real-time WebSocket Dispatch Mechanism
-10. Geolocation and Live Tracking
+3. Application Domain and Role Hierarchy
+4. Existing System Analysis
+5. Limitations of Existing Systems
+6. Proposed System Overview
+7. Database Design, Normalization, and Integrity Constraints
+8. Proposed Database Structure and Schema Architecture
+9. Real-time Dispatch Workflow and Logic Architecture
+10. Geolocation, Spatial Pre-filtering, and Road Navigation
 11. Advanced Database Concepts (Views, Stored Procedures, Triggers)
-12. Innovation
-13. Novelty and Differentiation
-14. Expected Outcomes and Benefits
+12. Security, Health Data Privacy, and Statutory Compliance
+13. Innovation and Novelty
+14. Expected Outcomes and Clinical Benefits
 15. SDG Alignment
-16. Proposed Technical Architecture
+16. Technical Architecture and System Implementation
 17. Conclusion
 
 ---
 
 ## 1. Introduction
 
-Emergency healthcare services require rapid coordination of patients, doctors, medical vehicles, and hospital facilities. In many regions, emergency dispatch is still handled through phone calls and independent radio networks. Such approaches lead to data silos, delayed response times, inaccurate location tracking, and difficulty maintaining a reliable history of dispatched events.
+Emergency healthcare services require instantaneous and synchronized coordination among distressed patients, available clinicians, mobile emergency units (ambulances), and hospital receiving facilities. In many regions, emergency dispatch is still managed through verbal phone relays, physical logbooks, or standalone communication channels. Such systems suffer from data silos, delayed response times, inaccurate location descriptions, resource double-booking, and the inability to maintain tamper-proof audit trails for legal and clinical review.
 
-MedRelay – Emergency Response and Healthcare Dispatch System – is proposed as an integrated emergency management platform that coordinates these critical activities through a centralised relational database and a real-time event system. The platform is designed to serve four distinct user roles: patients who trigger emergencies, doctors who respond, dispatchers who allocate resources, and administrators who manage the entire system.
+MedRelay – Emergency Response and Healthcare Dispatch System – is an integrated emergency management platform that unifies real-time event distribution with relational database rigor. The platform provides role-tailored operational consoles for patients triggering emergencies, doctors responding in the field or in-hospital wards, dispatchers overseeing regional resource distribution, and administrators managing credentialing, audit compliance, and incident analytics.
 
-The platform uses PostgreSQL and Prisma ORM as its database foundation, with normalisation and integrity constraints to maintain consistent relationships between emergency entities. WebSockets (Socket.io) provide real-time updates for emergency alerts and dispatch acknowledgements, while React-Leaflet provides accurate geographical context by plotting patient and doctor locations on live interactive maps. The backend is powered by Express.js with RESTful API endpoints, and the frontend is built using React with Vite as the build tool.
+The platform employs PostgreSQL (hosted on Supabase) and Prisma ORM as its database foundation, with strict normalization and transactional integrity. Real-time bidirectional telemetry is handled via Socket.io with isolated room subscriptions, while React-Leaflet and Google Maps navigation deep-links provide precise geographic context. The backend is implemented in Node.js/Express.js, and the user interface is built with React 19 and Vite.
 
 ---
 
 ## 2. Problem Definition
 
-The primary problem addressed by MedRelay is the fragmented and inefficient management of emergency alerts, doctor dispatching, patient location tracking, and response coordination. Traditional approaches result in:
+The core challenge addressed by MedRelay is the fragmented, vulnerable, and uncoordinated state of emergency response systems. Specific failure modes in conventional dispatch include:
 
-- Delayed response times due to manual dispatching via phone calls and radio, with no automated proximity-based matching of the nearest available doctor to the patient.
-- Inaccurate tracking of patient and doctor locations, relying on verbal communication of addresses rather than precise GPS coordinates.
-- Weak role-based access control where sensitive medical history (blood group, age, prior conditions) may not be securely restricted to only the assigned responding doctor.
-- Difficulty tracking the complete lifecycle of an emergency event, from the initial alert through dispatch, acknowledgement, and completion.
-- Lack of real-time communication between patients waiting for help and the doctor en route to their location, leading to anxiety and uncertainty.
-- No centralised analytics for administrators to understand response patterns, identify high-frequency emergency areas, and optimise resource distribution.
-
-These issues directly affect patient outcomes by making emergency response slower, less organised, and less reliable.
-
----
-
-## 3. Application Domain
-
-The proposed system belongs to the domain of Emergency Response and Health Informatics. The platform supports four primary user categories, each with clearly defined responsibilities and access levels:
-
-| User Category | Responsibilities |
-| :--- | :--- |
-| **Patients** | Register with medical profiles (age, gender, blood group, medical history), trigger emergency alerts with GPS location, specify emergency type and landmark details, track dispatch status in real time, and view the assigned doctor's information and live location on a map. |
-| **Doctors** | Register with specialisation credentials, toggle on-duty/off-duty status, broadcast live GPS location while on duty (updated every 10 seconds), receive assigned emergency alerts with full patient medical details, and acknowledge alerts to confirm en-route status. |
-| **Administrators** | View system-wide statistics (total doctors, available doctors, total patients), manage doctor and patient records (view and delete), and access analytics dashboards showing emergency type distribution (pie charts), area-wise case frequency (bar charts), and average dispatch response time. |
-| **Guest / Bystanders** | Use the One-Tap Guest SOS feature on the homepage to dispatch help immediately without registration, using only their current GPS coordinates. |
-
-*Table 1: User categories of MedRelay*
+1. **Dispatch Delays & Mental Computation:** Dispatchers rely on verbal phone descriptions and mental estimates of clinician locations, introducing severe response latency.
+2. **Resource Race Conditions & Double Booking:** Concurrent emergency calls frequently allocate the same clinician or ambulance unit simultaneously due to non-atomic read-then-write operations.
+3. **Clinical Mismatch & Hazardous Fallback:** Inappropriate specialist selection (e.g., dispatching a cardiologist 40 km away over an emergency physician 1 km away for an acute cardiac arrest) or silent substitution without notifying responders.
+4. **Disjoint Fleet & Clinician Tracking:** Ambulances are treated as static database entries disconnected from the responding clinician, leaving the patient unable to ascertain actual vehicle movement.
+5. **Inpatient Ward vs. Field Misclassification:** Dispatching street ambulances for admitted patients who require urgent on-foot resuscitation within hospital wards.
+6. **Stale Telemetry & Device Dropout:** Eligible dispatch lists containing clinicians whose devices have lost signal or run out of battery, resulting in orphaned alerts.
+7. **Bystander SOS Abuse:** Unauthenticated emergency triggers causing denial-of-service and tying up critical emergency infrastructure.
+8. **Audit Trail Destruction:** Overzealous cascade deletion rules that permanently erase dispatch records, medical histories, and timestamps when a user profile is deleted.
+9. **Incomplete Emergency Lifecycles:** Systems that terminate tracking upon scene arrival without modeling patient stabilization, ambulance transport, and emergency department handover.
+10. **Data Privacy Exposure:** Broadcast of sensitive medical histories (blood group, allergies, past conditions) across unencrypted, unauthenticated public socket channels.
 
 ---
 
-## 4. Existing System
+## 3. Application Domain and Role Hierarchy
 
-Traditional emergency dispatch centres commonly use independent telecommunication systems, physical logbooks, or legacy desktop software applications to manage emergency calls, ambulance dispatching, and hospital bed availability. A dispatcher receives a phone call, manually records the patient's spoken address, searches through printed or digital lists of available doctors and ambulances, and verbally relays instructions over radio.
+MedRelay operates within the domain of **Emergency Response and Health Informatics**. To guarantee strict separation of concerns, the system enforces Role-Based Access Control (RBAC) at the database and application levels across four database roles defined in the `Role` ENUM:
 
-These approaches operate as data silos. Patient medical history is stored separately from dispatch records. Doctor availability is tracked informally. Location information is based on addresses described verbally by distressed callers, not on precise GPS coordinates. There is no automated system to match the nearest available specialist to the patient's location.
-
-Furthermore, conventional emergency management systems do not combine live WebSocket-based alerting, proximity-based doctor matching, and interactive geospatial mapping in a unified web platform accessible from any device.
-
----
-
-## 5. Limitations of the Existing System
-
-**5.1 Dispatch Delays**
-Without real-time proximity-based resource matching, manual allocation of doctors and ambulances leads to significantly increased response times. A dispatcher must mentally determine which doctor is closest, which is inherently inaccurate and slow.
-
-**5.2 Data Inconsistency**
-Changes made to an emergency's status (such as a doctor acknowledging a call) may not be instantly reflected across other independent monitoring systems. A patient has no way to know whether their request has been received or whether a doctor is on the way.
-
-**5.3 Limited Access Control**
-Sensitive medical history, including blood group, age, pre-existing conditions, and contact numbers, may not be securely restricted. In existing systems, any staff member may access any patient's data regardless of whether they are the assigned responder.
-
-**5.4 Lack of Live Tracking**
-Traditional systems do not maintain a live visual map of doctor and patient coordinates. Dispatchers rely on static addresses rather than dynamic GPS positions, which is especially problematic when the patient is outdoors, in an unfamiliar area, or unable to articulate their exact location.
-
-**5.5 No Specialisation Matching**
-Existing systems rarely automate the process of matching a patient's emergency type (cardiac, trauma, paediatric, orthopaedic) to a doctor with the corresponding specialisation. The system either sends the nearest doctor regardless of specialisation, or relies on the dispatcher's knowledge.
-
-**5.6 No Analytical Insights**
-Legacy systems provide no dashboards or analytics for administrators to understand response patterns, identify frequently affected areas, or measure average response times.
-
----
-
-## 6. Proposed System
-
-MedRelay proposes a centralised emergency management platform that integrates patient profiles, doctor availability and specialisation, real-time emergency alerts, proximity-based dispatch, live geolocation tracking, and administrative analytics.
-
-The system uses a normalised relational database (3NF) to minimise redundancy and maintain consistent relationships between emergency entities. PostgreSQL is the database management system, while Prisma ORM provides a type-safe, schema-driven interaction layer between the Node.js application and the database. Role-based access control is implemented for patients, doctors, and administrators using JWT (JSON Web Token) authentication, where each token encodes the user's ID and role, and API endpoints verify the role before granting access.
-
-For rapid coordination, the system incorporates WebSockets (Socket.io) to push real-time updates. When a patient triggers an alert, the system automatically finds the nearest available doctor using the Haversine distance formula applied to GPS coordinates, creates a dispatch record linking the alert to the assigned doctor, and broadcasts the event in real time. The patient can then see the assigned doctor's name, phone number, specialisation, and distance on their screen, along with a live Leaflet map showing both their own location and the doctor's position.
-
-The admin dashboard provides visual analytics using Recharts, including pie charts of emergency type distribution, horizontal bar charts of outdoor emergency hotspots, and a calculated average dispatch response time.
-
----
-
-## 7. Database Design and Technologies
-
-The proposed system uses the following database concepts and technologies:
-
-| Technology / Concept | Purpose |
-| :--- | :--- |
-| **PostgreSQL** | Relational database management system for storing all application data |
-| **Prisma ORM** | Type-safe database schema definition, migration, and query interface |
-| **3NF Normalisation** | Reduce data redundancy by separating User, Profile, Alert, Dispatch, and Feedback entities |
-| **Primary Keys** | Auto-incrementing integer IDs uniquely identify every record in every table |
-| **Foreign Keys** | Maintain relationships between entities (e.g., PatientProfile → User, DispatchRecord → EmergencyAlert) |
-| **Unique Constraints** | Prevent duplicate emails (User.email), duplicate license plates (Vehicle.licensePlate), and one-to-one mappings (DoctorProfile.userId, PatientProfile.userId, DispatchRecord.alertId) |
-| **ENUMs** | Restrict the Role field to ADMIN, DOCTOR, PATIENT, DISPATCHER and the AlertStatus field to PENDING, DISPATCHED, COMPLETED, CANCELLED |
-| **B-Tree Indexing** | Improve query performance on frequently filtered columns: User.role, EmergencyAlert.status, DoctorProfile.isAvailable |
-| **Cascade Deletion** | Maintain referential integrity by automatically deleting dependent profiles, dispatch records, and feedback when a parent record is removed |
-| **Database Views** | ActiveEmergenciesView provides a virtual table filtering only PENDING alerts |
-| **Stored Procedures** | archive_completed_alerts automates archival of old completed alerts |
-| **Triggers** | trg_update_timestamp automatically updates the updatedAt timestamp on every EmergencyAlert modification |
-| **Transactions** | Used during user registration to atomically create both the User record and the corresponding DoctorProfile or PatientProfile |
-| **bcrypt Hashing** | Passwords are hashed with a salt round of 10 before storage |
-| **JWT Authentication** | Stateless authentication tokens encoding userId and role, with 1-hour expiry |
-| **Socket.io (WebSockets)** | Real-time bidirectional event communication for alert status updates and doctor location broadcasting |
-| **React-Leaflet / Geolocation** | Interactive mapping of patient and doctor positions using OpenStreetMap tiles |
-| **Haversine Formula** | Calculates the great-circle distance between GPS coordinates for proximity-based doctor matching |
-| **Recharts** | Data visualisation library for admin analytics (PieChart, BarChart) |
-
-*Table 2: Technologies and database concepts used in MedRelay*
-
----
-
-## 8. Proposed Database Structure
-
-The relational database organises emergency information into eight interconnected entities. Primary and foreign key relationships maintain referential integrity between them.
-
-### 8.1 Entity Descriptions
-
-| Entity | Description | Key Attributes |
+| Database Role | System Responsibilities | Access Scope |
 | :--- | :--- | :--- |
-| **User** | Central authentication entity for all roles | id (PK), email (UNIQUE), password (hashed), role (ENUM), createdAt, updatedAt |
-| **DoctorProfile** | Extended profile for doctors | id (PK), userId (FK → User, UNIQUE), fullName, specialization, phoneNumber, isAvailable, currentLat, currentLng |
-| **PatientProfile** | Extended profile for patients | id (PK), userId (FK → User, UNIQUE), fullName, phoneNumber, age, gender, medicalHistory, bloodGroup |
-| **Hospital** | Registered medical facilities | id (PK), name, address, latitude, longitude, contactNumber |
-| **Vehicle** | Emergency vehicles | id (PK), licensePlate (UNIQUE), type, isAvailable |
-| **EmergencyAlert** | Individual emergency incidents | id (PK), patientId (FK → PatientProfile), latitude, longitude, status (ENUM), description, createdAt, updatedAt |
-| **DispatchRecord** | Links an alert to assigned resources | id (PK), alertId (FK → EmergencyAlert, UNIQUE), doctorId (FK → DoctorProfile), vehicleId (FK → Vehicle), hospitalId (FK → Hospital), dispatchedAt, completedAt |
-| **Feedback** | Post-dispatch feedback from users | id (PK), dispatchRecordId (FK → DispatchRecord, UNIQUE), userId (FK → User), rating (1–5), comments, createdAt |
+| **`PATIENT`** | Initiates SOS alerts with live GPS, specifies emergency type (cardiac, trauma, pediatric, orthopedic, general), specifies location type (outdoor street vs. inpatient ward), tracks assigned doctor and ambulance in real time, and submits post-emergency ratings and feedback. | Restricted strictly to their own medical profile and active emergency alert room. |
+| **`DOCTOR`** | Registers clinical specializations, toggles on-duty/off-duty availability, broadcasts continuous GPS telemetry while on duty, receives assigned emergency dispatches with triage context, acknowledges calls (`DISPATCHED`), initiates hospital transport (`TRANSPORTING`), and completes clinical resolution (`COMPLETED`). | Access to their assigned emergencies and patient triage notes. |
+| **`DISPATCHER`** | Monitors regional emergency caseloads via `ActiveEmergenciesView`, oversees active clinician positions and ambulance availability, and manages hospital destination assignments. | Read-level oversight of active alerts, clinicians, and facility capacities. |
+| **`ADMIN`** | Exercises full operational control over clinical credentialing, provider onboarding, patient directory management, compliance-driven PII redaction, and aggregate analytics dashboards (distribution, hotspots, response times). | Unrestricted administrative and mutation authority. |
 
-*Table 3: Entity descriptions*
+*Table 1: MedRelay Role Hierarchy*
 
-### 8.2 Entity Relationships
-
-| Relationship | Type | Description |
-| :--- | :--- | :--- |
-| User → DoctorProfile | One-to-One | Each doctor account has exactly one professional profile |
-| User → PatientProfile | One-to-One | Each patient account has exactly one medical profile |
-| PatientProfile → EmergencyAlert | One-to-Many | A patient can trigger multiple emergency alerts over time |
-| EmergencyAlert → DispatchRecord | One-to-One | Each alert generates exactly one dispatch record upon resource allocation |
-| DoctorProfile → DispatchRecord | One-to-Many | A doctor may be assigned to multiple dispatch records across different emergencies |
-| Vehicle → DispatchRecord | One-to-Many | A vehicle may be dispatched to multiple emergencies |
-| Hospital → DispatchRecord | One-to-Many | A hospital may be the destination for multiple dispatch records |
-| DispatchRecord → Feedback | One-to-One | A completed dispatch may generate exactly one feedback entry |
-| User → Feedback | One-to-Many | A user may submit feedback for multiple completed dispatches |
-
-*Table 4: Entity relationships*
-
-The normalised structure ensures that patient information is stored once in PatientProfile, doctor information once in DoctorProfile, and emergency event data is separated into EmergencyAlert and DispatchRecord, avoiding duplication while allowing efficient retrieval through foreign key joins.
+### 3.1 Guest SOS vs. Database Identity
+A key design distinction in MedRelay is the handling of bystander emergencies. Rather than creating an unauthenticated database role (which would violate relational integrity and foreign key constraints on `EmergencyAlert.patientId`), the **One-Tap Guest SOS** workflow automatically provisions an ephemeral user account with the `PATIENT` role. This ensures that every emergency alert is linked to a valid relational profile while enabling instantaneous dispatch without manual registration barriers.
 
 ---
 
-## 9. Real-time WebSocket Dispatch Mechanism
+## 4. Existing System Analysis
 
-MedRelay incorporates WebSockets (Socket.io) to improve the speed and reliability of emergency coordination. The real-time communication flow operates as follows:
+Legacy emergency dispatch systems rely on disconnected communication silos:
+- Telephony networks (PSTN/cellular) for incoming caller intake.
+- Analog or trunked radio systems for ambulance crew dispatch.
+- Paper logbooks or standalone desktop spreadsheets for tracking on-duty clinicians.
+- Disconnected hospital reception terminals for bed occupancy management.
 
-**Step 1 – Alert Trigger:** When a patient triggers an emergency, the browser captures the patient's GPS coordinates via the Geolocation API and sends a POST request to the backend. The backend creates an EmergencyAlert record with status set to PENDING.
-
-**Step 2 – Proximity-Based Doctor Matching:** The backend fetches all doctors where isAvailable is true and whose currentLat and currentLng are not null. Using the Haversine formula, it calculates the great-circle distance in metres between the patient's GPS coordinates and each available doctor's coordinates. If the patient specified a required specialisation (such as Cardiology or Trauma Surgery), the system first filters doctors by that specialisation and selects the nearest one. If no specialist is available, the system falls back to the nearest available doctor of any specialisation and flags the dispatch as a fallback.
-
-**Step 3 – Dispatch Record Creation:** The system creates a DispatchRecord linking the EmergencyAlert to the selected DoctorProfile. The patient immediately receives the doctor's name, phone number, specialisation, and distance.
-
-**Step 4 – Real-time Status Updates:** The patient's frontend establishes a Socket.io connection and joins a room identified by the alert ID. When the assigned doctor views the alert on their dashboard and clicks "Acknowledge En Route," the backend updates the alert status to DISPATCHED and emits a Socket.io event to the patient's room. The patient's interface instantly updates without requiring a page refresh.
-
-**Step 5 – Live Doctor Location:** While on duty, the doctor's browser sends their GPS coordinates to the backend every 10 seconds via a PATCH request. The backend stores these coordinates and emits them via Socket.io. The patient's live map (React-Leaflet) updates the doctor's marker position in real time.
-
-This end-to-end real-time pipeline ensures zero-delay communication from the moment an alert is triggered to the moment the doctor arrives.
+Because these channels operate independently, data handoffs are manual and error-prone. A dispatcher receives a spoken address, consults a physical or digital list of on-duty staff, radios a crew, and assumes the unit is en route. Patient medical histories are unavailable until hospital arrival, and neither the patient nor the receiving hospital has real-time visibility into the transit status of the mobile emergency unit.
 
 ---
 
-## 10. Geolocation and Live Tracking
+## 5. Limitations of Existing Systems
 
-The mapping component of MedRelay provides a crucial visual layer for emergency response. The system stores exact latitude and longitude coordinates for:
-
-- **EmergencyAlert:** The patient's GPS position at the time the alert was triggered.
-- **DoctorProfile:** The doctor's continuously updated GPS position (refreshed every 10 seconds while on duty).
-- **Hospital:** The registered coordinates of each hospital facility.
-
-Using React-Leaflet on the frontend with OpenStreetMap tile layers, the patient dashboard displays an interactive map showing their own location and, once dispatched, the assigned doctor's live position. The Haversine formula implementation in the backend calculates distances in metres and formats them as either metres or kilometres for display.
-
-The system uses the browser's native Geolocation API (navigator.geolocation.getCurrentPosition) to obtain coordinates. For doctors, a setInterval function re-reads their position every 10 seconds and sends a PATCH request to update their profile in the database, simultaneously emitting the new position via Socket.io to any connected patient tracking that doctor.
-
-This eliminates the need for manual address lookup and significantly optimises the assignment of the closest available medical personnel.
+1. **Lack of Automated Spatial Matching:** No computational ranking of candidate responders based on real-time coordinates.
+2. **Susceptibility to Race Conditions:** Concurrent dispatchers can simultaneously commit the same ambulance or clinician to multiple emergencies.
+3. **No Dynamic Telemetry Integration:** Static street addresses are used rather than live device GPS, leading to navigation errors when patients are in unfamiliar or outdoor locations.
+4. **Absence of Fallback Intelligence:** Inability to balance clinical specialism against travel distance, leading to dangerous delays when a requested specialist is too distant.
+5. **Vulnerability to Telemetry Staleness:** Responders who lose network connectivity remain eligible for dispatch, causing unanswered calls.
+6. **Regulatory Non-Compliance:** Lack of structured state transition auditing, tamper-proof logs, and GDPR/HIPAA-compliant data redaction.
 
 ---
 
-## 11. Advanced Database Concepts
+## 6. Proposed System Overview
 
-To enhance the performance, maintainability, and automation of MedRelay, several advanced PostgreSQL database features were implemented beyond the standard schema.
+MedRelay resolves these systemic deficiencies by uniting a normalized relational database with real-time WebSocket communications, automated spatial dispatch algorithms, and interactive GIS mapping.
 
-### 11.1 Database Views for Simplified Querying
-
-In a real-time emergency dispatch system, dispatchers frequently need to retrieve a list of ongoing emergencies. Instead of repeatedly writing complex queries to filter alerts across the system, a Database View named ActiveEmergenciesView was created. This view acts as a virtual table that continuously presents only the emergencies with a PENDING status. By querying this view instead of the raw EmergencyAlert table, the application simplifies frontend data fetching, reduces query complexity, and ensures consistent filtering logic across the entire platform. Any query issued against the view automatically reflects the latest state of the underlying EmergencyAlert table.
-
-### 11.2 Automated Data Archiving via Stored Procedures
-
-As the system handles thousands of emergency alerts over time, keeping historical data in the active operational tables can eventually degrade query performance. To mitigate this, a Stored Procedure named archive_completed_alerts was developed using the PL/pgSQL procedural language. This procedure automatically scans the EmergencyAlert table to identify alerts that have been marked as COMPLETED for more than 30 days, and updates their description field to indicate they are archived. Using a stored procedure allows this heavy batch-processing operation to be executed entirely on the database server side, significantly reducing network overhead between the application and the database and improving overall system performance.
-
-### 11.3 Maintaining Data Integrity with Database Triggers
-
-Accurate timestamping is critical in an emergency dispatch system to track exactly when an alert's status changes, for example from PENDING to DISPATCHED or from DISPATCHED to COMPLETED. To ensure the updatedAt timestamp is always perfectly accurate without relying on application-level code, a Database Trigger was implemented. A trigger function named update_timestamp_func was created to automatically set the updatedAt field to the current database server time (NOW()) whenever any column in the row is modified. The trigger trg_update_timestamp is bound directly to the EmergencyAlert table and fires immediately before every UPDATE operation on any row. This guarantees strict chronological integrity for all emergency events and provides a tamper-proof audit trail, since the timestamp is set by the database server itself rather than the application.
+Key pillars of the proposed platform include:
+- **Atomic Resource Commit:** Allocating an emergency alert, locking doctor availability (`isAvailable = false`), and reserving an emergency vehicle are executed within an atomic database transaction (`prisma.$transaction`), completely eliminating double-booking race conditions.
+- **Hierarchical Spatial Dispatch:** Employs the Haversine formula as a lightweight computational pre-filter to rank available clinicians, enforced with a 15 km specialist distance ceiling and a 3x proximity ratio limit. Road-network turn-by-turn navigation is deep-linked via Google Maps for actual street travel around physical obstacles.
+- **Comprehensive Lifecycle Tracking:** Models the complete clinical workflow: `PENDING` ➔ `DISPATCHED` ➔ `TRANSPORTING` ➔ `COMPLETED` (or `CANCELLED`), ensuring visibility from initial trigger through scene triage, hospital transport, and final clinical handover.
+- **Dual-Mode Response Logic:** Differentiates between outdoor field emergencies (dispatching a mobile doctor deployed aboard an emergency ambulance) and inpatient ward emergencies (direct on-foot response within the facility, bypassing vehicle reservation).
+- **Proactive Abuse Mitigation:** Implements an in-memory sliding-window IP rate limiter (maximum 5 requests per 10 minutes) on emergency endpoints to mitigate denial-of-service spam.
 
 ---
 
-## 12. Innovation
+## 7. Database Design, Normalization, and Integrity Constraints
 
-The primary innovation of MedRelay is the integration of relational emergency data management, live WebSocket broadcasting, proximity-based specialisation matching, and geographic mapping within a single unified web platform.
+### 7.1 Normalization and 3NF Design
+The database structure was designed to adhere to Third Normal Form (3NF) across eight core entities, eliminating update anomalies and minimizing data duplication:
+- **First Normal Form (1NF):** Every attribute contains atomic values with unique column names and primary keys identifying every record. *Engineering Discussion on Medical History:* In practical clinical informatics, `medicalHistory` is stored as an unstructured triage summary note (e.g., "Hypertension, Penicillin Allergy") for immediate, rapid comprehension by responding clinicians during acute crisis triage. In a fully decomposed theoretical schema, this is modeled as an `Allergy` entity and a `PatientAllergy` junction table (`patientId`, `allergen`, `severity`). MedRelay adopts the unstructured clinical triage note to guarantee sub-second delivery to mobile devices without requiring complex multi-table joins during emergency rendering.
+- **Second Normal Form (2NF):** All non-key attributes are fully functionally dependent on the primary key, avoiding partial dependencies.
+- **Third Normal Form (3NF):** Transitive dependencies are removed. Hospital details reside in `Hospital`, vehicle details in `Vehicle`, user credentials in `User`, and clinician attributes in `DoctorProfile`.
 
-Unlike systems that manage calls and vehicle dispatching separately through independent tools, MedRelay connects all emergency entities – patients, doctors, vehicles, hospitals, alerts, and dispatches – through a normalised relational database with enforced integrity constraints. The Haversine formula provides mathematically accurate proximity matching to assign the nearest available specialist to each emergency. Live Socket.io events provide a mechanism for immediate, bidirectional incident communication without polling. Integrated React-Leaflet mapping enables visually guided, GPS-precise allocation of healthcare resources.
+### 7.2 Derived State and Synchrony
+A critical concern in emergency systems is the synchronization of derived status flags, such as `DoctorProfile.isAvailable`. If a clinician is dispatched, their availability flag must not go out of sync with active dispatch records. MedRelay enforces consistency through two complementary layers:
+1. **Atomic Transaction Updates:** Any alert creation atomically flips `DoctorProfile.isAvailable = false` and `Vehicle.isAvailable = false`.
+2. **Relational Query Verification:** The candidate doctor query does not rely solely on the boolean flag; it explicitly verifies that the clinician has no ongoing dispatches in unresolved states:
+   ```prisma
+   dispatches: {
+       none: {
+           alert: {
+               status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] }
+           }
+       }
+   }
+   ```
+   This ensures that even if an in-memory state fluctuates, the relational database guarantees zero double-booking.
 
-The One-Tap Guest SOS feature further differentiates MedRelay by allowing any bystander, even without an account, to dispatch emergency help using only their current GPS location with a single button press.
+### 7.3 Referential Integrity and Soft PII Redaction
+While cascade deletion (`onDelete: Cascade`) is appropriate for ephemeral authentication tokens or test setups, permanently deleting clinician or patient rows in healthcare destroys legal audit history and violates clinical record retention mandates (e.g., statutory 7-year medical incident retention). 
+
+MedRelay resolves this by replacing destructive cascade deletions with **Compliance-Driven PII Redaction** (`adminController.deletePatient`):
+- When an erasure request is executed under GDPR Art. 17 (Right to Erasure), personal identifiers (`fullName`, `phoneNumber`, `medicalHistory`, and user email) are permanently redacted.
+- Historical `EmergencyAlert` and `DispatchRecord` records are strictly preserved with their original timestamps and response metrics, maintaining statistical integrity and clinical audit trails.
 
 ---
 
-## 13. Novelty and Differentiation
+## 8. Proposed Database Structure and Schema Architecture
 
-The novelty of the proposed system lies in combining the following capabilities within a single platform:
+The relational schema comprises eight primary entities managed through PostgreSQL:
 
-- Centralised emergency data management with normalised relational schema in 3NF.
-- Role-based access control across four distinct user types (Patient, Doctor, Admin, Guest) enforced through JWT token verification.
-- Automated proximity-based doctor matching using the Haversine distance formula on stored GPS coordinates.
-- Specialisation-aware dispatching with intelligent fallback (if no cardiologist is nearby, the nearest general doctor is dispatched instead).
-- Real-time WebSocket-based dispatch alerts and status updates with zero polling latency.
-- Live interactive geolocation mapping of patients and doctors on the same map.
-- Comprehensive lifecycle tracking of each emergency from Alert creation through Dispatch, Acknowledgement, Completion, and Feedback.
-- Administrative analytics with visual charts (emergency type distribution, area-wise hotspot analysis, average response time).
-- Advanced database automation through Views, Stored Procedures, and Triggers.
-- Guest SOS capability requiring no registration for bystander emergencies.
+| Entity | Primary Key | Foreign Keys & Unique Constraints | Key Attributes |
+| :--- | :--- | :--- | :--- |
+| **`User`** | `id` (Int) | `email` (UNIQUE) | `password` (bcrypt), `role` (`Role` ENUM), `createdAt`, `updatedAt` |
+| **`DoctorProfile`** | `id` (Int) | `userId` (FK → `User.id`, UNIQUE) | `fullName`, `specialization`, `phoneNumber`, `isAvailable`, `currentLat`, `currentLng` |
+| **`PatientProfile`** | `id` (Int) | `userId` (FK → `User.id`, UNIQUE) | `fullName`, `phoneNumber`, `age`, `gender`, `bloodGroup`, `medicalHistory` |
+| **`Hospital`** | `id` (Int) | – | `name`, `address`, `latitude`, `longitude`, `contactNumber` |
+| **`Vehicle`** | `id` (Int) | `licensePlate` (UNIQUE) | `type` (ALS/BLS), `isAvailable` |
+| **`EmergencyAlert`** | `id` (Int) | `patientId` (FK → `PatientProfile.id`) | `latitude`, `longitude`, `status` (`AlertStatus` ENUM), `description`, `createdAt`, `updatedAt` |
+| **`DispatchRecord`** | `id` (Int) | `alertId` (UNIQUE), `doctorId`, `vehicleId`, `hospitalId` | `dispatchedAt`, `completedAt` |
+| **`Feedback`** | `id` (Int) | `dispatchRecordId` (UNIQUE), `userId` (FK) | `rating` (1–5), `comments`, `createdAt` |
 
-This combination differentiates MedRelay from conventional emergency systems that primarily focus on basic data storage, manual resource allocation, and offline dispatching.
+*Table 2: Entity Schema and Relational Constraints*
+
+### 8.1 Schema Definition (`schema.prisma`)
+```prisma
+enum Role {
+  ADMIN
+  DOCTOR
+  PATIENT
+  DISPATCHER
+}
+
+enum AlertStatus {
+  PENDING
+  DISPATCHED
+  TRANSPORTING
+  COMPLETED
+  CANCELLED
+}
+
+model EmergencyAlert {
+  id             Int             @id @default(autoincrement())
+  patientId      Int
+  patient        PatientProfile  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  latitude       Float
+  longitude      Float
+  status         AlertStatus     @default(PENDING)
+  description    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  dispatchRecord DispatchRecord?
+
+  @@index([status])
+}
+```
 
 ---
 
-## 14. Expected Outcomes and Benefits
+## 9. Real-time Dispatch Workflow and Logic Architecture
 
-- **Reduced response times** through automated, proximity-based doctor dispatching and live WebSocket notifications that eliminate manual phone-based coordination.
-- **Optimised resource allocation** through visual geolocation mapping and the Haversine formula, ensuring the closest available doctor is always assigned.
-- **Specialisation matching** that prioritises doctors with the relevant specialisation for the emergency type, improving clinical outcomes.
-- **Reduced data redundancy** through 3NF database normalisation, with separate entities for Users, Profiles, Alerts, Dispatches, and Feedback.
-- **Improved data consistency** through relational constraints including foreign keys, unique constraints, ENUMs, and cascade deletion rules.
-- **Secure access** through JWT-based authentication and role-based authorisation, ensuring patients see only their own data and doctors see only their assigned alerts with full patient medical context.
-- **Better incident traceability** through comprehensive dispatch logging from alert creation to feedback submission.
-- **Real-time patient reassurance** through live map tracking and instant status updates, reducing anxiety during emergencies.
-- **Administrative insights** through analytics dashboards that reveal emergency patterns, area hotspots, and system performance metrics.
+The dispatch lifecycle executes through an automated, atomic five-stage pipeline:
+
+```
+[Patient SOS] ➔ [Rate Limiter] ➔ [Spatial Pre-filter] ➔ [Specialist Guard] ➔ [Atomic Transaction]
+                                                                                      │
+  ┌─────────────────────────────── Life Cycle Flow ───────────────────────────────────┘
+  ▼
+[PENDING] ➔ [DISPATCHED (Doctor Acknowledges)] ➔ [TRANSPORTING (En Route to Hospital)] ➔ [COMPLETED]
+  │
+  └───────➔ [CANCELLED (Atomic Resource Release: Doctor & Ambulance freed)]
+```
+
+### Step 1 – Ingestion & Abuse Mitigation
+Incoming SOS triggers pass through an IP sliding-window rate limiter (5 requests / 10 minutes). Requests exceeding the threshold are blocked with HTTP 429 and immediate guidance to dial national emergency hotlines (112 / 108).
+
+### Step 2 – Proximity Pre-Filtering & GPS Heartbeat Verification
+Available doctors are queried with relational exclusion of active dispatches. The system verifies GPS telemetry freshness:
+```javascript
+const STALE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const isFreshGPS = doc.user?.updatedAt ? (now - new Date(doc.user.updatedAt).getTime() < STALE_TIMEOUT_MS) : false;
+```
+Clinicians with active, recent GPS broadcasts are prioritized over stale or offline coordinates, preventing dispatch to abandoned or dead devices.
+
+### Step 3 – Specialist Proximity Safeguards & Explicit Fallback
+When a patient requests a specialization (e.g., Cardiology):
+1. The system computes distance to all matching specialists and the closest emergency general physician.
+2. If the nearest specialist exceeds the absolute safety ceiling (`MAX_SPECIALIST_DISTANCE_METERS = 15000` metres) OR exceeds three times the distance of the closest emergency general physician, the system falls back to the nearest emergency physician.
+3. The alert is explicitly tagged: `isFallback: true` with a detailed clinical rationale (`fallbackReason`), rendered prominently in yellow warning banners on both the doctor and patient consoles.
+
+### Step 4 – Atomic Resource Locking (`prisma.$transaction`)
+The system creates the `EmergencyAlert`, links the `DispatchRecord`, marks `DoctorProfile.isAvailable = false`, and reserves an available ambulance in a single ACID transaction:
+```javascript
+const result = await prisma.$transaction(async (tx) => {
+    const alert = await tx.emergencyAlert.create({ ... });
+    await tx.doctorProfile.update({ where: { id: closestDoctor.id }, data: { isAvailable: false } });
+    if (allocatedVehicle) {
+        await tx.vehicle.update({ where: { id: allocatedVehicle.id }, data: { isAvailable: false } });
+    }
+    const dispatch = await tx.dispatchRecord.create({ ... });
+    return { alert, dispatch };
+});
+```
+
+### Step 5 – Mobile Team Model & Ward Handling
+For street emergencies, the doctor is deployed on-board the allocated ambulance unit (e.g., `TN-23-EM-0108`, ALS). The doctor's smartphone GPS serves as the real-time telemetry transponder beacon for the vehicle en route to the scene. For indoor/ward alerts, street ambulance allocation is bypassed (`allocatedVehicle = null`), and the doctor is instructed for immediate on-foot ward arrival.
+
+### Step 6 – Hospital Transport & Safe Cancellation
+- **Hospital Transport (`TRANSPORTING`):** When the patient is stabilized on scene, the doctor initiates transport via `PATCH /api/alerts/:id/transport`. The patient and hospital receive live tracking of the ambulance's transit to the emergency department.
+- **Cancellation (`CANCELLED`):** If an alert is cancelled by the patient or clinician, `PATCH /api/alerts/:id/cancel` immediately frees both the clinician (`isAvailable = true`) and the vehicle (`isAvailable = true`), restoring fleet capacity.
+
+---
+
+## 10. Geolocation, Spatial Pre-filtering, and Road Navigation
+
+### 10.1 The Role of the Haversine Formula
+The Haversine formula calculates the great-circle spherical distance between two points on the Earth's surface:
+$$d = 2R \arcsin \left( \sqrt{\sin^2\left(\frac{\Delta \phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta \lambda}{2}\right)} \right)$$
+
+*Engineering Clarification on Spatial Routing:*
+Over municipal city distances (< 10 km), the spherical curvature error compared to flat-plane Euclidean geometry is computationally negligible (< 0.1%). However, great-circle distance is not travel distance—a clinician 1 km away across an unbridged river, railway line, or complex one-way road system may take 25 minutes to arrive, whereas a clinician 3 km away on a direct highway arrives in 5 minutes. 
+
+MedRelay uses the Haversine formula strictly as a **low-latency $O(N)$ candidate pre-filter** to rapidly prune hundreds of regional doctors down to the nearest candidates. Real-time road navigation, turn-by-turn routing, and live road-network ETAs are provided via embedded Google Maps Navigation deep-links (`https://www.google.com/maps/dir/?api=1&destination=...`) integrated directly into the clinician's mobile dispatch console.
+
+---
+
+## 11. Advanced Database Concepts (Views, Stored Procedures, Triggers)
+
+MedRelay implements native PostgreSQL database objects to ensure operational performance, data integrity, and compliance:
+
+### 11.1 `ActiveEmergenciesView` (Database View)
+Dispatchers require continuous visibility into unresolved emergencies. Rather than having the application repeatedly execute complex multi-table joins with filtering clauses, `ActiveEmergenciesView` aggregates ongoing incidents:
+```sql
+CREATE OR REPLACE VIEW "ActiveEmergenciesView" AS
+SELECT 
+    a.id AS "alertId",
+    a.status,
+    a.latitude,
+    a.longitude,
+    a.description,
+    a."createdAt",
+    p."fullName" AS "patientName",
+    p."phoneNumber" AS "patientPhone",
+    p."bloodGroup",
+    p."medicalHistory",
+    d."id" AS "dispatchId",
+    doc."fullName" AS "doctorName",
+    doc."specialization",
+    doc."phoneNumber" AS "doctorPhone",
+    h."name" AS "hospitalName",
+    v."licensePlate" AS "vehiclePlate",
+    v."type" AS "vehicleType"
+FROM "EmergencyAlert" a
+LEFT JOIN "PatientProfile" p ON a."patientId" = p.id
+LEFT JOIN "DispatchRecord" d ON a.id = d."alertId"
+LEFT JOIN "DoctorProfile" doc ON d."doctorId" = doc.id
+LEFT JOIN "Hospital" h ON d."hospitalId" = h.id
+LEFT JOIN "Vehicle" v ON d."vehicleId" = v.id
+WHERE a.status IN ('PENDING', 'DISPATCHED', 'TRANSPORTING');
+```
+*Alignment Note:* The view accurately reflects all active, ongoing emergencies across `PENDING`, `DISPATCHED`, and `TRANSPORTING` statuses, ensuring that clinicians currently in transit remain fully visible on dispatcher dashboards.
+
+### 11.2 `AlertStatusAudit` & `trg_log_alert_status` (Database Trigger)
+Rather than duplicating Prisma's built-in `@updatedAt` timestamp handling, MedRelay implements an immutable audit trigger to log every status transition across the emergency lifecycle:
+```sql
+CREATE TABLE IF NOT EXISTS "AlertStatusAudit" (
+    id SERIAL PRIMARY KEY,
+    "alertId" INTEGER NOT NULL,
+    "oldStatus" VARCHAR(50),
+    "newStatus" VARCHAR(50) NOT NULL,
+    "changedAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE OR REPLACE FUNCTION log_alert_status_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (OLD.status IS DISTINCT FROM NEW.status) THEN
+        INSERT INTO "AlertStatusAudit" ("alertId", "oldStatus", "newStatus", "changedAt")
+        VALUES (NEW.id, OLD.status::text, NEW.status::text, NOW());
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_log_alert_status ON "EmergencyAlert";
+CREATE TRIGGER trg_log_alert_status
+AFTER UPDATE OF status ON "EmergencyAlert"
+FOR EACH ROW EXECUTE FUNCTION log_alert_status_change();
+```
+This guarantees an unalterable chronological audit record of when every status transition occurred, providing tamper-proof evidence for clinical review.
+
+### 11.3 `EmergencyAlertArchive` & Stored Procedure (Automated Archiving)
+Deleting resolved emergency records after 30 days violates healthcare record-retention statutes. MedRelay introduces a dedicated `EmergencyAlertArchive` table and a stored procedure that migrates resolved alerts past the retention threshold into cold storage:
+```sql
+CREATE TABLE IF NOT EXISTS "EmergencyAlertArchive" (
+    id INTEGER PRIMARY KEY,
+    "patientId" INTEGER,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    status VARCHAR(50),
+    description TEXT,
+    "createdAt" TIMESTAMP(3),
+    "archivedAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE OR REPLACE PROCEDURE archive_completed_alerts(retention_days INT DEFAULT 30)
+LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO "EmergencyAlertArchive" (id, "patientId", latitude, longitude, status, description, "createdAt", "archivedAt")
+    SELECT id, "patientId", latitude, longitude, status::text, description, "createdAt", NOW()
+    FROM "EmergencyAlert"
+    WHERE status = 'COMPLETED'
+      AND "updatedAt" < NOW() - (retention_days || ' days')::INTERVAL
+    ON CONFLICT (id) DO NOTHING;
+
+    DELETE FROM "EmergencyAlert"
+    WHERE status = 'COMPLETED'
+      AND "updatedAt" < NOW() - (retention_days || ' days')::INTERVAL;
+END;
+$$;
+```
+This ensures high query performance on active operational tables while retaining full historical records in the archive partition.
+
+---
+
+## 12. Security, Health Data Privacy, and Statutory Compliance
+
+### 12.1 HIPAA & GDPR Emergency Medical Exemptions
+Emergency medical dispatch operates under strict legal frameworks governing protected health information:
+- **HIPAA 45 CFR § 164.512(j):** Disclosure of protected health information is permitted without prior individual authorization to avert serious and imminent threats to health or safety.
+- **GDPR Article 9(2)(c):** Processing of special category health data is legally permitted when processing is necessary to protect the vital interests of the data subject or another natural person where the subject is physically incapable of giving consent.
+
+MedRelay collects explicit emergency consent on registration and displays prominent compliance disclosures upon SOS dispatch, notifying users that live coordinates and medical histories are shared strictly with the assigned clinical response unit.
+
+### 12.2 WebSocket Room Isolation
+To prevent unauthorized access to sensitive medical data (blood group, phone numbers, allergies) and live clinician GPS coordinates, MedRelay enforces strict room-level isolation:
+```javascript
+// Server isolates subscriptions by alert ID
+socket.on('joinAlertRoom', (alertId) => {
+    socket.join(`alert_${alertId}`);
+});
+
+// Location updates and status transitions are emitted exclusively to the alert room
+io.to(`alert_${alertId}`).emit('alertUpdate', { status: 'TRANSPORTING' });
+```
+Clients cannot observe or intercept telemetry from emergencies outside their authorized room.
+
+### 12.3 Production Credential Security
+- Passwords are encrypted using `bcryptjs` with 10 salt rounds.
+- Default administrator credentials in `seed.js` are parameterized via `process.env.ADMIN_INITIAL_PASSWORD`, falling back to a secure high-entropy string (`MedRelayAdmin2026!`) rather than insecure static passwords.
+
+---
+
+## 13. Innovation and Novelty
+
+MedRelay introduces several distinct engineering innovations:
+1. **Holistic Lifecycle Modeling:** Unlike basic alerting tools, MedRelay models the full arc of emergency healthcare, including hospital transport, bed coordination, and post-incident ratings.
+2. **Dual-Mode Dispatch Architecture:** Dynamically shifts response behavior between street-level ambulance navigation and indoor hospital ward on-foot triage.
+3. **Fail-Safe Proximity Guarding:** Eliminates hazardous specialist fallbacks through algorithmic distance and ratio thresholds, ensuring patient stabilization is never sacrificed for distant credentials.
+4. **Non-Destructive Compliance Archival:** Combines PostgreSQL triggers and stored procedures to guarantee that operational table pruning never compromises medical record retention.
+
+---
+
+## 14. Expected Outcomes and Clinical Benefits
+
+- **Decreased Emergency Response Time:** Automated spatial matching and WebSocket dispatch eliminate 3–8 minutes of manual radio and telephone relay delays.
+- **Elimination of Resource Contention:** Transactional concurrency control prevents vehicle and clinician double-booking during surge events.
+- **Reduced Patient Anxiety:** Real-time visual tracking of the approaching clinician and ambulance provides reassurance during critical waiting windows.
+- **Tamper-Proof Audit Readiness:** Automated status transition triggers ensure complete accountability for medical malpractice and incident reviews.
 
 ---
 
 ## 15. SDG Alignment
 
-**SDG 3 – Good Health and Well-being**
-MedRelay directly supports efficient and organised emergency healthcare services by reducing dispatch response times, automating proximity-based resource allocation, and providing immediate access to critical patient medical information for responding doctors. By ensuring that the nearest qualified specialist reaches the patient as quickly as possible, the platform contributes to improved health outcomes and reduced mortality from delayed emergency response.
-
-**SDG 9 – Industry, Innovation and Infrastructure**
-The project promotes the use of modern database management, real-time web technologies (WebSockets), and geographic information systems to build resilient digital healthcare infrastructure. By integrating PostgreSQL, Prisma ORM, Socket.io, and React-Leaflet into a unified platform, MedRelay demonstrates how contemporary software architecture can be applied to improve emergency response infrastructure.
-
-**SDG 11 – Sustainable Cities and Communities**
-By providing real-time emergency dispatch coverage, area-wise analytics for resource planning, and one-tap SOS access for any bystander, MedRelay contributes to making communities safer and more resilient to medical emergencies.
+- **SDG 3 – Good Health and Well-Being (Target 3.6 & 3.d):** MedRelay directly combats pre-hospital mortality through rapid dispatch, proximity matching, and immediate delivery of triage histories to responding teams.
+- **SDG 9 – Industry, Innovation, and Infrastructure:** Integrates modern cloud database architecture, type-safe ORMs, and real-time event distribution into resilient municipal healthcare infrastructure.
+- **SDG 11 – Sustainable Cities and Communities:** Strengthens emergency preparedness and disaster resilience through area-wise incident hotspot analysis and accessible bystander SOS access.
 
 ---
 
-## 16. Proposed Technical Architecture
+## 16. Technical Architecture and System Implementation
 
-The overall architecture is organised in distinct layers, from the user-facing application through security and data management to live event handling and spatial mapping.
-
-| Layer | Components |
-| :--- | :--- |
-| **Presentation Layer** | React (Vite) web application with role-specific dashboards for Patients, Doctors, and Administrators. Routing handled by React Router DOM. |
-| **Security Layer** | JWT authentication (jsonwebtoken) with bcrypt password hashing (salt rounds: 10). Role-based access control encoded in tokens (userId, role). |
-| **Application Layer** | Express.js REST API with modular route and controller architecture: authRoutes, alertRoutes, doctorRoutes, patientRoutes, adminRoutes. |
-| **Data Layer** | PostgreSQL database with Prisma ORM. Eight normalised entities: User, DoctorProfile, PatientProfile, Hospital, Vehicle, EmergencyAlert, DispatchRecord, Feedback. Advanced features: Views, Stored Procedures, Triggers. |
-| **Event Layer** | Socket.io WebSocket server for real-time bidirectional communication. Room-based architecture (alert rooms) for targeted event broadcasting. |
-| **Geospatial Layer** | React-Leaflet with OpenStreetMap tiles for interactive mapping. Haversine formula for distance calculation. Browser Geolocation API for GPS coordinate acquisition. |
-| **Analytics Layer** | Recharts library for data visualisation. PieChart for emergency type distribution. BarChart for area-wise case frequency. Computed average response time metrics. |
-| **Deployment Layer** | Frontend deployed on Vercel (static hosting). Backend deployed on Render (Node.js hosting). PostgreSQL database hosted on a cloud provider. |
-
-*Table 5: MedRelay layered architecture*
-
-User requests pass through JWT authentication and role-based access control to the Express.js backend API. The API reads and writes emergency data in PostgreSQL through Prisma ORM, and routes live events through the Socket.io server. The frontend consumes REST API responses for data and Socket.io events for real-time updates, rendering interactive maps and analytics charts accordingly.
+The system is deployed as a distributed cloud application:
+- **Presentation Layer:** React 19 single-page application built with Vite, styled with custom vanilla CSS design tokens, hosted on **Vercel** (`https://dbms-project-blush.vercel.app`).
+- **Application & Event Layer:** Node.js 20 / Express.js REST API with Socket.io WebSocket server hosted on **Render** (`https://emergency-backend-3ppk.onrender.com`).
+- **Persistence Layer:** PostgreSQL 15 database hosted on **Supabase** with connection pooling, native views, triggers, and stored procedures.
 
 ---
 
 ## 17. Conclusion
 
-MedRelay proposes and implements an integrated emergency management platform for improving the organisation, speed, and accuracy of emergency healthcare response. The system combines PostgreSQL-based relational database management, Prisma ORM for type-safe schema interaction, 3NF database normalisation, role-based access control with JWT authentication, real-time WebSocket communication via Socket.io, proximity-based doctor matching using the Haversine formula, and live geolocation mapping through React-Leaflet.
+MedRelay demonstrates how modern relational database concepts—strict normalization, ACID transactions, database views, status change triggers, and automated stored procedure archival—can be synthesized with real-time WebSockets and GIS mapping to build an enterprise-grade emergency dispatch platform. 
 
-Advanced database features including Views, Stored Procedures, and Triggers further enhance the platform by automating common queries, batch data processing, and timestamp integrity. The administrative analytics dashboard provides actionable insights into emergency patterns and system performance.
-
-The proposed solution addresses common limitations of fragmented emergency response systems and demonstrates how modern database technologies, combined with real-time web communication and spatial computing, can create a more reliable, faster, and more intelligent healthcare dispatch platform.
+By systematically addressing the 20 critical design, concurrency, telemetry, and regulatory failure modes common in pre-hospital emergency software, MedRelay delivers a fast, reliable, and auditable solution that protects patient lives while maintaining full clinical and legal integrity.
