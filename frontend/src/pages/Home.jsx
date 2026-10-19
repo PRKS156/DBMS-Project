@@ -54,6 +54,9 @@ export default function Home() {
            if (data.alertId) {
              localStorage.setItem('activeAlertId', data.alertId);
            }
+           if (data.trackingToken) {
+             localStorage.setItem('activeTrackingToken', data.trackingToken);
+           }
         } else {
            setSosStatus({ error: data.message || 'Failed to dispatch.' });
         }
@@ -130,7 +133,7 @@ export default function Home() {
               <button
                 className="btn teal"
                 style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                onClick={() => navigate(`/track-ambulance?alertId=${sosStatus.alertId}`)}
+                onClick={() => navigate(`/track-ambulance?alertId=${sosStatus.alertId}&token=${localStorage.getItem('activeTrackingToken') || ''}`)}
               >
                 📍 Track Doctor on Full Live Map ➔
               </button>

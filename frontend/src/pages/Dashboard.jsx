@@ -73,12 +73,23 @@ export default function Dashboard() {
   const socketRef = useRef(null);
   const watchIdRef = useRef(null);
 
+  const [adminTab, setAdminTab] = useState(role === 'DISPATCHER' ? 'dispatch' : 'directory');
+  const [activeEmergenciesList, setActiveEmergenciesList] = useState([]);
+  const [reassignAlertId, setReassignAlertId] = useState(null);
+  const [selectedReassignDoc, setSelectedReassignDoc] = useState('');
+
   useEffect(() => {
     if (!token) {
       navigate('/');
-    } else if (role === 'ADMIN') {
+    } else if (role === 'ADMIN' || role === 'DISPATCHER') {
       fetchAdminStats();
       fetchAdminAnalytics();
+      fetchActiveEmergencies();
+      const interval = setInterval(() => {
+        fetchActiveEmergencies();
+        fetchAdminStats();
+      }, 5000);
+      return () => clearInterval(interval);
     } else if (role === 'DOCTOR') {
       fetchDoctorAlerts();
       const interval = setInterval(fetchDoctorAlerts, 4000);
@@ -304,6 +315,50 @@ export default function Dashboard() {
     }
   };
 
+  const fetchActiveEmergencies = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/alerts/active-view`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setActiveEmergenciesList(data.emergencies || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleManualReassign = async (alertId, doctorId) => {
+    if (!doctorId) {
+      alert("Please select a doctor to assign.");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/alerts/${alertId}/reassign`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ doctorId: parseInt(doctorId) })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert("Emergency responder successfully reassigned!");
+        setReassignAlertId(null);
+        setSelectedReassignDoc('');
+        fetchActiveEmergencies();
+        fetchAdminStats();
+      } else {
+        alert(data.message || "Failed to reassign alert.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Network error reassigning responder.");
+    }
+  };
+
   const fetchAdminAnalytics = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/admin/analytics`, {
@@ -346,27 +401,208 @@ export default function Dashboard() {
     navigate('/');
   };
 
-  if (role === 'ADMIN') {
+  if (role === 'ADMIN' || role === 'DISPATCHER') {
     return (
       <section className="card wide screen active">
         <div className="dash-top">
           <div>
-            <span className="eyebrow">Administrative portal</span>
-            <h1>Dispatch directory</h1>
-            <p className="sub">A current view of registered clinicians and patient records held by the service.</p>
+            <span className="eyebrow">{role === 'DISPATCHER' ? 'Regional Dispatch Command' : 'Administrative & Dispatch Portal'}</span>
+            <h1>{role === 'DISPATCHER' ? 'Active Emergency Dispatch Console' : 'Dispatch & Clinical Operations'}</h1>
+            <p className="sub">Real-time incident queue, ActiveEmergenciesView ledger, and fleet resource management.</p>
           </div>
           <div className="dash-actions">
-            <button className="btn-sm ghost" type="button" onClick={fetchAdminStats}>Refresh directory</button>
+            <button className="btn-sm ghost" type="button" onClick={() => { fetchAdminStats(); fetchActiveEmergencies(); }}>Refresh Live Queue</button>
             <button className="btn-sm plain" type="button" onClick={handleLogout}>Sign out</button>
           </div>
         </div>
+
+        {/* Tab Navigation for Dispatchers and Admins */}
+        <div style={{ display: 'flex', gap: '10px', marginTop: '1.5rem', borderBottom: '2px solid #e2e8f0', paddingBottom: '8px' }}>
+          <button
+            type="button"
+            onClick={() => setAdminTab('dispatch')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              background: adminTab === 'dispatch' ? '#0f766e' : '#f1f5f9',
+              color: adminTab === 'dispatch' ? '#fff' : '#475569',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            🚨 Live Dispatch Operations ({activeEmergenciesList.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdminTab('directory')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              background: adminTab === 'directory' ? '#0f766e' : '#f1f5f9',
+              color: adminTab === 'directory' ? '#fff' : '#475569',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            👥 Clinician & Patient Directory
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdminTab('analytics')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              background: adminTab === 'analytics' ? '#0f766e' : '#f1f5f9',
+              color: adminTab === 'analytics' ? '#fff' : '#475569',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            📊 System Incident Analytics
+          </button>
+        </div>
         
-        <div className="metrics">
+        <div className="metrics" style={{ marginTop: '1.5rem' }}>
           <div className="metric"><span>Registered clinicians</span><strong>{adminStats.totalDoctors}</strong></div>
           <div className="metric ok"><span>Currently available</span><strong>{adminStats.availableDoctors}</strong></div>
           <div className="metric busy"><span>Engaged or off duty</span><strong>{adminStats.busyOrOffDuty}</strong></div>
-          <div className="metric"><span>Patient records</span><strong>{adminStats.totalPatients}</strong></div>
+          <div className="metric"><span>Ongoing emergencies</span><strong>{activeEmergenciesList.length}</strong></div>
         </div>
+
+        {/* Tab 1: Dispatcher Operations Console (Critique #7 & #11: ActiveEmergenciesView & Manual Reassignment) */}
+        {adminTab === 'dispatch' && (
+          <div style={{ marginTop: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0 }}>🚨 Active Regional Emergencies (ActiveEmergenciesView)</h3>
+                <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.88rem' }}>
+                  Aggregated virtual view across PENDING, DISPATCHED, and TRANSPORTING lifecycle stages.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <span style={{ padding: '4px 8px', borderRadius: '4px', background: '#fef3c7', color: '#92400e', fontSize: '12px', fontWeight: 'bold' }}>
+                  Pending: {activeEmergenciesList.filter(e => e.status === 'PENDING').length}
+                </span>
+                <span style={{ padding: '4px 8px', borderRadius: '4px', background: '#dcfce7', color: '#166534', fontSize: '12px', fontWeight: 'bold' }}>
+                  Dispatched: {activeEmergenciesList.filter(e => e.status === 'DISPATCHED').length}
+                </span>
+                <span style={{ padding: '4px 8px', borderRadius: '4px', background: '#e0f2fe', color: '#0369a1', fontSize: '12px', fontWeight: 'bold' }}>
+                  Transporting: {activeEmergenciesList.filter(e => e.status === 'TRANSPORTING').length}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #cbd5e1', background: '#f8fafc', color: '#334155' }}>
+                    <th style={{ padding: '10px 8px' }}>Alert ID</th>
+                    <th style={{ padding: '10px 8px' }}>Status</th>
+                    <th style={{ padding: '10px 8px' }}>Patient / Triage</th>
+                    <th style={{ padding: '10px 8px' }}>Location / Landmark</th>
+                    <th style={{ padding: '10px 8px' }}>Assigned Clinician</th>
+                    <th style={{ padding: '10px 8px' }}>Ambulance Unit</th>
+                    <th style={{ padding: '10px 8px' }}>Receiving Facility</th>
+                    <th style={{ padding: '10px 8px' }}>Dispatcher Intervention</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeEmergenciesList.length === 0 ? (
+                    <tr>
+                      <td colSpan="8" style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
+                        🎉 All clear! Zero active emergencies in queue.
+                      </td>
+                    </tr>
+                  ) : activeEmergenciesList.map(item => (
+                    <tr key={item.alertId} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '10px 8px', fontWeight: 'bold' }}>#{item.alertId}</td>
+                      <td style={{ padding: '10px 8px' }}>
+                        <span style={{
+                          padding: '4px 8px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          background: item.status === 'PENDING' ? '#fef3c7' : (item.status === 'TRANSPORTING' ? '#e0f2fe' : '#dcfce7'),
+                          color: item.status === 'PENDING' ? '#92400e' : (item.status === 'TRANSPORTING' ? '#0369a1' : '#166534')
+                        }}>
+                          {item.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        <strong>{item.patientName || 'Anonymous Bystander'}</strong>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Blood: {item.bloodGroup || 'N/A'} • {item.patientPhone || 'No phone'}</div>
+                      </td>
+                      <td style={{ padding: '10px 8px', maxWidth: '200px', fontSize: '0.82rem', color: '#334155' }}>
+                        {item.description}
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        {item.doctorName ? (
+                          <div>
+                            <strong>Dr. {item.doctorName}</strong>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>{item.specialization}</div>
+                          </div>
+                        ) : (
+                          <span style={{ color: '#ef4444', fontWeight: 'bold' }}>⚠️ Unassigned (Pending)</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        {item.vehiclePlate ? `🚑 ${item.vehiclePlate}` : <span style={{ color: '#94a3b8' }}>On-foot / None</span>}
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        {item.hospitalName ? `🏥 ${item.hospitalName}` : 'City General Hospital'}
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        {reassignAlertId === item.alertId ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <select
+                              value={selectedReassignDoc}
+                              onChange={e => setSelectedReassignDoc(e.target.value)}
+                              style={{ fontSize: '12px', padding: '4px' }}
+                            >
+                              <option value="">Select Doctor...</option>
+                              {doctorsList.map(d => (
+                                <option key={d.id} value={d.id}>
+                                  Dr. {d.name} ({d.specialization}) {d.isAvailable ? '• Available' : '• Busy'}
+                                </option>
+                              ))}
+                            </select>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button
+                                className="btn-sm"
+                                style={{ background: '#0f766e', color: '#fff', border: 'none', padding: '2px 8px', fontSize: '11px' }}
+                                onClick={() => handleManualReassign(item.alertId, selectedReassignDoc)}
+                              >
+                                Commit
+                              </button>
+                              <button
+                                className="btn-sm plain"
+                                style={{ padding: '2px 8px', fontSize: '11px' }}
+                                onClick={() => setReassignAlertId(null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            className="btn-sm ghost"
+                            style={{ fontSize: '11px', padding: '4px 8px' }}
+                            onClick={() => { setReassignAlertId(item.alertId); setSelectedReassignDoc(''); }}
+                          >
+                            ⚡ Reassign
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div style={{ marginTop: '2rem' }}>
           <h3>Registered Doctors</h3>
@@ -707,6 +943,9 @@ export default function Dashboard() {
             if (data.alertId) {
               setActiveAlertId(data.alertId);
             }
+            if (data.trackingToken) {
+              localStorage.setItem('activeTrackingToken', data.trackingToken);
+            }
           } else {
             setError(data.message || 'Failed to dispatch.');
           }
@@ -888,7 +1127,7 @@ export default function Dashboard() {
                 {activeAlertDetails.status === 'DISPATCHED' && '✅ The doctor has confirmed and is heading to your location right now!'}
                 {activeAlertDetails.status === 'TRANSPORTING' && `🚑 Patient secured! En route to ${activeAlertDetails.hospitalName || 'network hospital'}. Emergency medical team accompanying.`}
               </div>
-              <button className="btn teal" style={{marginTop: '16px', width: '100%'}} onClick={() => navigate(`/track-ambulance?alertId=${activeAlertId}`)}>
+              <button className="btn teal" style={{marginTop: '16px', width: '100%'}} onClick={() => navigate(`/track-ambulance?alertId=${activeAlertId}&token=${localStorage.getItem('activeTrackingToken') || ''}`)}>
                 <span aria-hidden="true">📍</span> Open Full-Screen Live Tracking
               </button>
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
@@ -995,11 +1234,11 @@ export default function Dashboard() {
               {loading ? 'Sending...' : 'Send for help now'} <span aria-hidden="true">→</span>
             </button>
 
-            {/* Privacy and Regulatory Compliance Notice (Items 8, 18, 19) */}
+            {/* Privacy and Regulatory Alignment Notice (Critique #19: India DPDP Act 2023 / GDPR Art. 9 / HIPAA) */}
             <div style={{ marginTop: '14px', padding: '10px 12px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#64748b', lineHeight: '1.4' }}>
-              <strong>🛡️ Privacy & Emergency Medical Compliance (HIPAA / GDPR Triage Exemption):</strong>
+              <strong>🛡️ Emergency Data Privacy (Aligned with India DPDP Act 2023 Sec 7(b), GDPR Art. 9(2)(c) & HIPAA):</strong>
               <div style={{ marginTop: '4px' }}>
-                By triggering this emergency alert, you authorize the secure relay of your live GPS telemetry and vital triage profile solely to the assigned response unit. All SOS dispatches are rate-limited and logged in a protected medical audit ledger.
+                By triggering this emergency alert, you authorize the secure relay of your live GPS telemetry and vital triage profile solely to the assigned response unit for immediate life-safety rescue. Data is encrypted in transit via TLS.
               </div>
             </div>
             {error && <div className="result error" style={{display:'block', marginTop: '15px'}}>{error}</div>}

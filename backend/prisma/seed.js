@@ -38,9 +38,14 @@ async function main() {
         }
     }
 
-    // 3. Seed Default Administrator
+    // 3. Seed Default Administrator (Critique #17: Require explicit env var in production; dynamic random dev fallback)
     console.log('Seeding default administrator...');
-    const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'MedRelayAdmin2026!';
+    const adminPasswordEnv = process.env.ADMIN_INITIAL_PASSWORD;
+    if (!adminPasswordEnv && process.env.NODE_ENV === 'production') {
+        throw new Error('FATAL: In production environments, ADMIN_INITIAL_PASSWORD environment variable must be explicitly defined.');
+    }
+    const crypto = require('crypto');
+    const initialPassword = adminPasswordEnv || crypto.randomBytes(16).toString('hex');
     const adminPassword = await bcrypt.hash(initialPassword, 10);
     const adminUser = await prisma.user.upsert({
         where: { email: 'admin@vit.edu' },
@@ -51,9 +56,13 @@ async function main() {
             role: 'ADMIN'
         }
     });
+    if (!adminPasswordEnv) {
+        console.log(`🔐 Generated secure dynamic initial admin password: ${initialPassword}`);
+        console.log('⚠️ Please store this password safely or set ADMIN_INITIAL_PASSWORD in your environment.');
+    }
 
-    // 4. Seed Clinicians with Specializations & Coordinates
-    console.log('Seeding clinicians...');
+    // 4. Seed Clinicians with Specializations, Hospital Affiliations & Coordinates (Critique #12)
+    console.log('Seeding clinicians with hospital linkages and fresh heartbeats...');
     const doctorsData = [
         {
             email: 'dr.ramesh@medrelay.com',
@@ -61,7 +70,8 @@ async function main() {
             specialization: 'Cardiology',
             phone: '9876543210',
             lat: 12.9710,
-            lng: 79.1610
+            lng: 79.1610,
+            hospitalId: 1
         },
         {
             email: 'dr.priya@medrelay.com',
@@ -69,7 +79,8 @@ async function main() {
             specialization: 'Trauma Surgery',
             phone: '9876543211',
             lat: 12.9698,
-            lng: 79.1575
+            lng: 79.1575,
+            hospitalId: 2
         },
         {
             email: 'dr.anita@medrelay.com',
@@ -77,7 +88,8 @@ async function main() {
             specialization: 'Pediatrics',
             phone: '9876543212',
             lat: 12.9735,
-            lng: 79.1625
+            lng: 79.1625,
+            hospitalId: 3
         },
         {
             email: 'dr.vikram@medrelay.com',
@@ -85,7 +97,8 @@ async function main() {
             specialization: 'Orthopedics',
             phone: '9876543213',
             lat: 12.9680,
-            lng: 79.1540
+            lng: 79.1540,
+            hospitalId: 1
         },
         {
             email: 'dr.suresh@medrelay.com',
@@ -93,7 +106,8 @@ async function main() {
             specialization: 'General Medicine',
             phone: '9876543214',
             lat: 12.9705,
-            lng: 79.1590
+            lng: 79.1590,
+            hospitalId: 2
         }
     ];
 
@@ -114,9 +128,20 @@ async function main() {
                             phoneNumber: d.phone,
                             isAvailable: true,
                             currentLat: d.lat,
-                            currentLng: d.lng
+                            currentLng: d.lng,
+                            lastLocationAt: new Date(),
+                            hospitalId: d.hospitalId
                         }
                     }
+                }
+            });
+        } else {
+            await prisma.doctorProfile.updateMany({
+                where: { userId: user.id },
+                data: {
+                    hospitalId: d.hospitalId,
+                    lastLocationAt: new Date(),
+                    isAvailable: true
                 }
             });
         }

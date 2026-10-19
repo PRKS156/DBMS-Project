@@ -127,13 +127,13 @@ The proposed system uses the following database concepts and technologies:
 | :--- | :--- |
 | **PostgreSQL** | Relational database management |
 | **Prisma ORM** | Database schema and application interaction |
-| **3NF Normalization** | Reduce data redundancy |
+| **Relational Normalization & Pragmatic Denormalization** | Balance entity normalization with sub-second crisis triage |
 | **Primary Keys** | Uniquely identify records |
 | **Foreign Keys** | Maintain relationships between entities |
 | **Unique Constraints** | Prevent duplicate values |
 | **ENUMs** | Restrict roles and alert statuses to predefined categories |
 | **B-Tree Indexing** | Improve query performance on roles, statuses, and availability |
-| **Referential Integrity** | Maintain valid relationships via Cascade deletions |
+| **Referential Integrity & Audit Preservation** | Maintain valid relationships via SetNull/Restrict to preserve legal clinical logs |
 | **JWT Authentication** | User authentication |
 | **Socket.io (WebSockets)** | Real-time event communication and live dispatching |
 | **Leaflet / Geolocation** | Spatial mapping of hospitals, patients, and dispatches |

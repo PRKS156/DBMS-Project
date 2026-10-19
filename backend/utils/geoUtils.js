@@ -76,9 +76,73 @@ function calculateBearing(lat1, lon1, lat2, lon2) {
     return ((θ * 180) / Math.PI + 360) % 360;
 }
 
+/**
+ * Queries OSRM road network routing engine to get true road distances and driving durations (ETAs)
+ * for candidate destinations from a single origin.
+ * Resolves critique #1: Doctors separated by rivers, rails, or one-way street networks are ranked by actual road-network driving time.
+ * Falls back gracefully to Haversine estimations if OSRM is unreachable or times out (> 2500ms).
+ *
+ * @param {number} originLat Origin latitude
+ * @param {number} originLng Origin longitude
+ * @param {Array<{lat: number, lng: number}>} destinationList Array of destination coordinates
+ * @returns {Promise<Array<{roadDistanceMeters: number, roadDurationSeconds: number, isRoadAccurate: boolean}>>}
+ */
+async function getRoadRoutingTable(originLat, originLng, destinationList) {
+    if (!destinationList || destinationList.length === 0) return [];
+
+    const coords = [`${originLng},${originLat}`, ...destinationList.map(d => `${d.lng},${d.lat}`)].join(';');
+    const url = `http://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=duration,distance`;
+
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2500);
+
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) throw new Error(`OSRM HTTP error: ${response.status}`);
+        const data = await response.json();
+
+        if (data.code === 'Ok' && data.distances && data.durations) {
+            const distances = data.distances[0];
+            const durations = data.durations[0];
+
+            return destinationList.map((dest, idx) => {
+                const dist = distances[idx + 1];
+                const dur = durations[idx + 1];
+                if (dist !== null && dist !== undefined && dur !== null && dur !== undefined) {
+                    return {
+                        roadDistanceMeters: Math.round(dist),
+                        roadDurationSeconds: Math.round(dur),
+                        isRoadAccurate: true
+                    };
+                }
+                const fallbackDist = getDistance(originLat, originLng, dest.lat, dest.lng);
+                return {
+                    roadDistanceMeters: Math.round(fallbackDist * 1.3),
+                    roadDurationSeconds: Math.round((fallbackDist * 1.3 / (40 * 1000 / 3600))),
+                    isRoadAccurate: false
+                };
+            });
+        }
+    } catch (err) {
+        console.warn('⚠️ OSRM road routing unavailable or timed out, using Haversine heuristic:', err.message);
+    }
+
+    return destinationList.map(dest => {
+        const fallbackDist = getDistance(originLat, originLng, dest.lat, dest.lng);
+        return {
+            roadDistanceMeters: Math.round(fallbackDist * 1.3),
+            roadDurationSeconds: Math.round((fallbackDist * 1.3 / (40 * 1000 / 3600))),
+            isRoadAccurate: false
+        };
+    });
+}
+
 module.exports = {
     getDistance,
     formatDistance,
     formatETA,
-    calculateBearing
+    calculateBearing,
+    getRoadRoutingTable
 };

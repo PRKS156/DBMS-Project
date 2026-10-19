@@ -49,6 +49,9 @@ model DoctorProfile {
   isAvailable    Boolean   @default(true)
   currentLat     Float?
   currentLng     Float?
+  lastLocationAt DateTime?
+  hospitalId     Int?
+  hospital       Hospital? @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
 
   dispatches     DispatchRecord[]
 
@@ -80,6 +83,7 @@ model Hospital {
   contactNumber  String
 
   dispatches     DispatchRecord[]
+  doctors        DoctorProfile[]
 }
 
 // 5. Vehicle Entity
@@ -96,7 +100,7 @@ model Vehicle {
 model EmergencyAlert {
   id             Int       @id @default(autoincrement())
   patientId      Int
-  patient        PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient        PatientProfile @relation(fields: [patientId], references: [id], onDelete: Restrict)
   latitude       Float
   longitude      Float
   status         AlertStatus    @default(PENDING)
@@ -113,16 +117,16 @@ model EmergencyAlert {
 model DispatchRecord {
   id             Int       @id @default(autoincrement())
   alertId        Int       @unique
-  alert          EmergencyAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  alert          EmergencyAlert @relation(fields: [alertId], references: [id], onDelete: Restrict)
   
   doctorId       Int?
-  doctor         DoctorProfile? @relation(fields: [doctorId], references: [id])
+  doctor         DoctorProfile? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
   
   vehicleId      Int?
-  vehicle        Vehicle?       @relation(fields: [vehicleId], references: [id])
+  vehicle        Vehicle?       @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
   
   hospitalId     Int?
-  hospital       Hospital?      @relation(fields: [hospitalId], references: [id])
+  hospital       Hospital?      @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
   
   dispatchedAt   DateTime       @default(now())
   completedAt    DateTime?

@@ -11,17 +11,68 @@ async function main() {
     console.log('Enum value notice:', err.message);
   }
 
-  // 1. Fix Item 14: View for ALL truly active emergencies (PENDING, DISPATCHED, TRANSPORTING)
-  console.log('Creating ActiveEmergenciesView covering all active alert states...');
+  // 1. Add dedicated lastLocationAt and hospitalId to DoctorProfile (Items #9, #10, #12)
+  console.log('Migrating DoctorProfile columns for dedicated GPS heartbeat and hospital linkage...');
   await prisma.$executeRawUnsafe(`
-    CREATE OR REPLACE VIEW "ActiveEmergenciesView" AS
-    SELECT id, "patientId", latitude, longitude, status, description, "createdAt", "updatedAt"
-    FROM "EmergencyAlert"
-    WHERE status IN ('PENDING', 'DISPATCHED', 'TRANSPORTING');
+    ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "lastLocationAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "hospitalId" INT;
   `);
 
-  // 2. Fix Item 16: True Archival Table and Stored Procedure (preserves medical records for compliance)
-  console.log('Creating EmergencyAlertArchive table and archival procedure...');
+  // Foreign key constraint on DispatchRecord: protect historical audit rows with SET NULL (Item #10)
+  try {
+    await prisma.$executeRawUnsafe(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'DispatchRecord_doctorId_fkey') THEN
+          ALTER TABLE "DispatchRecord" DROP CONSTRAINT "DispatchRecord_doctorId_fkey";
+        END IF;
+        ALTER TABLE "DispatchRecord" ADD CONSTRAINT "DispatchRecord_doctorId_fkey" 
+          FOREIGN KEY ("doctorId") REFERENCES "DoctorProfile"(id) ON DELETE SET NULL;
+      END $$;
+    `);
+  } catch (err) {
+    console.log('Notice adjusting DispatchRecord foreign key:', err.message);
+  }
+
+  // 2. Fix Item 14: View for ALL truly active emergencies (PENDING, DISPATCHED, TRANSPORTING)
+  console.log('Creating ActiveEmergenciesView covering all active alert states...');
+  await prisma.$executeRawUnsafe(`DROP VIEW IF EXISTS "ActiveEmergenciesView";`);
+  await prisma.$executeRawUnsafe(`
+    CREATE OR REPLACE VIEW "ActiveEmergenciesView" AS
+    SELECT 
+      a.id AS "alertId",
+      a.status,
+      a.latitude,
+      a.longitude,
+      a.description,
+      a."createdAt",
+      a."updatedAt",
+      p.id AS "patientId",
+      p."fullName" AS "patientName",
+      p."phoneNumber" AS "patientPhone",
+      p."bloodGroup",
+      p."medicalHistory",
+      d.id AS "dispatchId",
+      doc.id AS "doctorId",
+      doc."fullName" AS "doctorName",
+      doc."specialization",
+      doc."phoneNumber" AS "doctorPhone",
+      h.name AS "hospitalName",
+      v."licensePlate" AS "vehiclePlate",
+      v."type" AS "vehicleType"
+    FROM "EmergencyAlert" a
+    LEFT JOIN "PatientProfile" p ON a."patientId" = p.id
+    LEFT JOIN "DispatchRecord" d ON a.id = d."alertId"
+    LEFT JOIN "DoctorProfile" doc ON d."doctorId" = doc.id
+    LEFT JOIN "Hospital" h ON d."hospitalId" = h.id
+    LEFT JOIN "Vehicle" v ON d."vehicleId" = v.id
+    WHERE a.status IN ('PENDING', 'DISPATCHED', 'TRANSPORTING');
+  `);
+
+  // 3. Fix Item 16: Atomic Move Archival Table and Stored Procedure (DELETE ... RETURNING moved)
+  console.log('Creating EmergencyAlertArchive table and atomic move archival procedure...');
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "EmergencyAlertArchive" (
       "id" INT PRIMARY KEY,
@@ -36,21 +87,26 @@ async function main() {
   `);
 
   await prisma.$executeRawUnsafe(`
-    CREATE OR REPLACE PROCEDURE archive_completed_alerts()
+    CREATE OR REPLACE PROCEDURE archive_completed_alerts(retention_days INT DEFAULT 30)
     LANGUAGE plpgsql
     AS $$
     BEGIN
-      -- Copy completed emergencies older than 30 days to archival table for long-term clinical audit compliance
-      INSERT INTO "EmergencyAlertArchive" ("id", "patientId", "latitude", "longitude", "status", "description", "createdAt")
-      SELECT id, "patientId", latitude, longitude, status, description, "createdAt"
-      FROM "EmergencyAlert"
-      WHERE status = 'COMPLETED' AND "updatedAt" < NOW() - INTERVAL '30 days'
+      -- Atomically move completed emergencies past retention window from operational table to cold storage archive table
+      WITH moved_alerts AS (
+        DELETE FROM "EmergencyAlert"
+        WHERE status = 'COMPLETED' 
+          AND "updatedAt" < NOW() - (retention_days || ' days')::INTERVAL
+        RETURNING id, "patientId", latitude, longitude, status::text, description, "createdAt"
+      )
+      INSERT INTO "EmergencyAlertArchive" ("id", "patientId", "latitude", "longitude", "status", "description", "createdAt", "archivedAt")
+      SELECT id, "patientId", latitude, longitude, status, description, "createdAt", NOW()
+      FROM moved_alerts
       ON CONFLICT ("id") DO NOTHING;
     END;
     $$;
   `);
 
-  // 3. Fix Item 15: Meaningful Status Audit Trigger (avoids Prisma @updatedAt redundancy)
+  // 4. Fix Item 15: Meaningful Status Audit Trigger (avoids Prisma @updatedAt redundancy)
   console.log('Creating AlertStatusAudit table and real-time status change audit trigger...');
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "AlertStatusAudit" (
@@ -84,7 +140,7 @@ async function main() {
     EXECUTE FUNCTION log_alert_status_transition();
   `);
 
-  console.log('✅ Successfully created View, Archive Stored Procedure, and Audit Trigger in PostgreSQL!');
+  console.log('✅ Successfully applied schema enhancements, View, Atomic Archival Stored Procedure, and Audit Trigger!');
 }
 
 main()

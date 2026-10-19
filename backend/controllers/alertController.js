@@ -1,15 +1,17 @@
 const prisma = require('../config/db.js');
-const { getDistance, formatDistance } = require('../utils/geoUtils');
+const jwt = require('jsonwebtoken');
+const { getDistance, formatDistance, formatETA, getRoadRoutingTable } = require('../utils/geoUtils');
 
 // Maximum acceptable distance to prioritize a specialist over a closer general emergency doctor
 const MAX_SPECIALIST_DISTANCE_METERS = 15000; // 15 km
 
 // In-memory sliding window rate limiting for emergency alerts (prevents bot/spam denial-of-service)
+// Critique #8: Capacity set to 15 / 10m to accommodate shared hospital/campus NAT proxy gateways
 const rateLimitMap = new Map();
 function checkRateLimit(clientIp) {
     const now = Date.now();
     const windowMs = 10 * 60 * 1000; // 10 minutes
-    const maxRequests = 5;
+    const maxRequests = 15;
     const timestamps = (rateLimitMap.get(clientIp) || []).filter(t => now - t < windowMs);
     if (timestamps.length >= maxRequests) {
         return false;
@@ -61,22 +63,41 @@ exports.triggerAlert = async (req, res) => {
     }
 
     try {
+        // Critique #12: Strictly use explicit locationType === 'Building' to identify indoor alerts
+        const isIndoorWard = (locationType === 'Building');
+
         // Query active, available doctors who are not currently committed to an active emergency
-        let availableDoctors = await prisma.doctorProfile.findMany({
-            where: {
-                isAvailable: true,
-                currentLat: { not: null },
-                currentLng: { not: null },
-                dispatches: {
-                    none: {
-                        alert: {
-                            status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] }
-                        }
+        let doctorWhere = {
+            isAvailable: true,
+            currentLat: { not: null },
+            currentLng: { not: null },
+            dispatches: {
+                none: {
+                    alert: {
+                        status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] }
                     }
                 }
-            },
-            include: { user: true }
+            }
+        };
+
+        // Critique #12: Indoor ward alerts prioritize clinicians affiliated with that hospital
+        if (isIndoorWard && hospitalId) {
+            doctorWhere.hospitalId = parseInt(hospitalId);
+        }
+
+        let availableDoctors = await prisma.doctorProfile.findMany({
+            where: doctorWhere,
+            include: { user: true, hospital: true }
         });
+
+        // Fallback to all available doctors if no clinicians specifically assigned to this hospital
+        if (availableDoctors.length === 0 && isIndoorWard && hospitalId) {
+            delete doctorWhere.hospitalId;
+            availableDoctors = await prisma.doctorProfile.findMany({
+                where: doctorWhere,
+                include: { user: true, hospital: true }
+            });
+        }
 
         // If no doctors are available, register escalated alert and advise immediate phone contact
         if (availableDoctors.length === 0) {
@@ -87,34 +108,48 @@ exports.triggerAlert = async (req, res) => {
             });
         }
 
-        // Compute distances and verify GPS telemetry freshness (Item 9: GPS trust & stale location timeout)
-        const STALE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+        // Critique #9: Strict 60-second GPS telemetry freshness check using dedicated lastLocationAt
+        const STALE_TIMEOUT_MS = 60 * 1000; // 60 seconds
         const now = Date.now();
-        let doctorsWithDistance = availableDoctors.map(doc => ({
-            ...doc,
-            distance_meters: getDistance(lat, lng, doc.currentLat, doc.currentLng),
-            isFreshGPS: doc.user?.updatedAt ? (now - new Date(doc.user.updatedAt).getTime() < STALE_TIMEOUT_MS) : false
-        }));
+        const freshDoctors = availableDoctors.filter(d => d.lastLocationAt && (now - new Date(d.lastLocationAt).getTime() < STALE_TIMEOUT_MS));
+        const candidateDoctors = freshDoctors.length > 0 ? freshDoctors : availableDoctors;
 
-        // Prioritize fresh GPS beacons over stale positions, then sort by proximity
-        doctorsWithDistance.sort((a, b) => {
-            if (a.isFreshGPS !== b.isFreshGPS) return a.isFreshGPS ? -1 : 1;
-            return a.distance_meters - b.distance_meters;
-        });
-        const closestGeneralDoctor = doctorsWithDistance[0];
+        // Critique #1: Haversine spatial pre-filter followed by true road-network ETA re-ranking via OSRM
+        let doctorsWithDistance = candidateDoctors.map(doc => ({
+            ...doc,
+            distance_meters: getDistance(lat, lng, doc.currentLat, doc.currentLng)
+        }));
+        doctorsWithDistance.sort((a, b) => a.distance_meters - b.distance_meters);
+
+        // Take top 3 to 5 candidate doctors and query OSRM for true driving distances and road ETAs
+        const topCount = Math.min(5, doctorsWithDistance.length);
+        const topCandidates = doctorsWithDistance.slice(0, topCount);
+        const roadResults = await getRoadRoutingTable(lat, lng, topCandidates.map(d => ({ lat: d.currentLat, lng: d.currentLng })));
+
+        for (let i = 0; i < topCandidates.length; i++) {
+            topCandidates[i].roadDistanceMeters = roadResults[i].roadDistanceMeters;
+            topCandidates[i].roadDurationSeconds = roadResults[i].roadDurationSeconds;
+            topCandidates[i].isRoadAccurate = roadResults[i].isRoadAccurate;
+        }
+
+        // Re-rank top candidate doctors by true road travel duration (ETA), resolving river/bridge/one-way detours
+        topCandidates.sort((a, b) => a.roadDurationSeconds - b.roadDurationSeconds);
+        const closestGeneralDoctor = topCandidates[0];
 
         let closestDoctor = null;
         let isFallback = false;
         let fallbackReason = null;
 
-        // Specialist matching with distance & ratio threshold (Item 1 & 5)
+        // Specialist matching with distance & ratio threshold (Critique #5: 2 km floor on 3x ratio)
         if (requiredSpecialization && requiredSpecialization !== 'Unsure / General') {
             const specialists = doctorsWithDistance.filter(d => d.specialization === requiredSpecialization);
             if (specialists.length > 0) {
                 const nearestSpecialist = specialists[0];
-                // Check if specialist is within safe emergency transit distance and within reasonable ratio
-                if (nearestSpecialist.distance_meters <= MAX_SPECIALIST_DISTANCE_METERS &&
-                    nearestSpecialist.distance_meters <= closestGeneralDoctor.distance_meters * 3) {
+                // Critique #5: Apply 3x ratio penalty ONLY if specialist is more than 2 km away
+                const isSpecialistClose = nearestSpecialist.distance_meters <= 2000;
+                const ratioOk = isSpecialistClose || (nearestSpecialist.distance_meters <= closestGeneralDoctor.distance_meters * 3);
+
+                if (nearestSpecialist.distance_meters <= MAX_SPECIALIST_DISTANCE_METERS && ratioOk) {
                     closestDoctor = nearestSpecialist;
                 } else {
                     isFallback = true;
@@ -174,9 +209,7 @@ exports.triggerAlert = async (req, res) => {
 
         const chosenHospitalName = targetHospital ? targetHospital.name : (hospitalName || landmark || 'City General Hospital');
 
-        // Identify if inpatient hospital ward alert (Item 12: Inpatient ward alerts must NOT dispatch street ambulances)
-        const isIndoorWard = locationType === 'Building' || Boolean(floor || roomNumber);
-
+        // Identify if inpatient hospital ward alert (Critique #12: Strictly use explicit locationType === 'Building')
         let alertDescription = '';
         if (isIndoorWard) {
             alertDescription = `${requiredSpecialization || 'General'} | Hospital: ${chosenHospitalName}, Floor: ${floor || 'N/A'}, Room: ${roomNumber || 'N/A'}${bedNumber ? `, Bed: ${bedNumber}` : ''} [INPATIENT ON-FOOT]`;
@@ -238,12 +271,33 @@ exports.triggerAlert = async (req, res) => {
             ? (fallbackReason || `Nearest available physician has been dispatched for rapid on-site stabilization.`)
             : `A qualified ${closestDoctor.specialization} specialist has been dispatched to your location.`;
 
+        // Critique #18: Issue signed per-alert tracking token for authenticated socket room and live map tracking
+        const trackingToken = jwt.sign(
+            { alertId: result.newAlert.id, role: 'ALERT_TRACKER' },
+            process.env.JWT_SECRET || 'supersecretkey',
+            { expiresIn: '6h' }
+        );
+
+        if (req.app.locals.io) {
+            req.app.locals.io.to(`alert_${result.newAlert.id}`).emit('alertUpdate', { status: 'PENDING' });
+            req.app.locals.io.emit('newEmergencyAlert', {
+                alertId: result.newAlert.id,
+                status: 'PENDING',
+                patientId: patientProfileId,
+                latitude: lat,
+                longitude: lng,
+                doctorName: closestDoctor.fullName,
+                doctorSpecialization: closestDoctor.specialization
+            });
+        }
+
         return res.status(200).json({
             success: true,
             message: dispatchMessage,
             isFallback: isFallback,
             fallbackReason: fallbackReason,
             alertId: result.newAlert.id,
+            trackingToken,
             dispatchedDoctor: {
                 id: closestDoctor.id,
                 name: closestDoctor.fullName,
@@ -590,5 +644,147 @@ exports.submitFeedback = async (req, res) => {
         return res.status(200).json({ success: true, message: "Feedback submitted successfully.", feedback });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Failed to submit feedback.", debug: error.message });
+    }
+};
+
+/**
+ * Fetch unresolved ongoing emergencies from ActiveEmergenciesView (Critique #11 & #14)
+ */
+exports.getActiveEmergenciesView = async (req, res) => {
+    try {
+        const emergencies = await prisma.$queryRawUnsafe(`
+            SELECT * FROM "ActiveEmergenciesView" ORDER BY "createdAt" DESC;
+        `);
+        return res.status(200).json({ success: true, emergencies });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to fetch active emergencies view.", debug: error.message });
+    }
+};
+
+/**
+ * Manual reassignment of emergency responders for Dispatcher UI (Critique #7 & #11)
+ */
+exports.reassignAlert = async (req, res) => {
+    const { id } = req.params;
+    const { doctorId, vehicleId, hospitalId } = req.body;
+    const alertId = parseInt(id);
+
+    try {
+        const currentDispatch = await prisma.dispatchRecord.findUnique({
+            where: { alertId }
+        });
+
+        if (!currentDispatch) {
+            return res.status(404).json({ success: false, message: "Dispatch record not found." });
+        }
+
+        await prisma.$transaction(async (tx) => {
+            // If reassigned to a different doctor, release previous doctor
+            if (currentDispatch.doctorId && currentDispatch.doctorId !== parseInt(doctorId)) {
+                await tx.doctorProfile.update({
+                    where: { id: currentDispatch.doctorId },
+                    data: { isAvailable: true }
+                });
+            }
+            // Lock new doctor availability
+            if (doctorId) {
+                await tx.doctorProfile.update({
+                    where: { id: parseInt(doctorId) },
+                    data: { isAvailable: false }
+                });
+            }
+            // Update dispatch record
+            await tx.dispatchRecord.update({
+                where: { alertId },
+                data: {
+                    doctorId: doctorId ? parseInt(doctorId) : currentDispatch.doctorId,
+                    vehicleId: vehicleId ? parseInt(vehicleId) : currentDispatch.vehicleId,
+                    hospitalId: hospitalId ? parseInt(hospitalId) : currentDispatch.hospitalId
+                }
+            });
+            // Update alert status to DISPATCHED if pending
+            await tx.emergencyAlert.update({
+                where: { id: alertId },
+                data: { status: 'DISPATCHED' }
+            });
+        });
+
+        if (req.app.locals.io) {
+            req.app.locals.io.to(`alert_${alertId}`).emit('alertUpdate', { status: 'DISPATCHED', reallocated: true });
+            req.app.locals.io.emit('dispatcherAlertUpdate', { alertId, reallocated: true });
+        }
+
+        return res.status(200).json({ success: true, message: "Alert reassigned successfully." });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to reassign alert.", debug: error.message });
+    }
+};
+
+/**
+ * Background retry worker for unassigned PENDING emergencies (Critique #7)
+ * Runs automatically every 15s to match newly freed doctors with waiting emergencies
+ */
+exports.retryPendingAlerts = async (io) => {
+    try {
+        const pendingAlerts = await prisma.emergencyAlert.findMany({
+            where: {
+                status: 'PENDING',
+                createdAt: { gte: new Date(Date.now() - 2 * 60 * 60 * 1000) } // past 2 hours
+            },
+            include: { dispatchRecord: true }
+        });
+
+        for (const alert of pendingAlerts) {
+            if (alert.dispatchRecord && alert.dispatchRecord.doctorId) continue;
+
+            const availableDoctor = await prisma.doctorProfile.findFirst({
+                where: {
+                    isAvailable: true,
+                    currentLat: { not: null },
+                    currentLng: { not: null },
+                    dispatches: {
+                        none: { alert: { status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] } } }
+                    }
+                }
+            });
+
+            if (availableDoctor) {
+                await prisma.$transaction(async (tx) => {
+                    await tx.doctorProfile.update({
+                        where: { id: availableDoctor.id },
+                        data: { isAvailable: false }
+                    });
+                    const vehicle = await tx.vehicle.findFirst({ where: { isAvailable: true } });
+                    if (vehicle) {
+                        await tx.vehicle.update({ where: { id: vehicle.id }, data: { isAvailable: false } });
+                    }
+                    if (alert.dispatchRecord) {
+                        await tx.dispatchRecord.update({
+                            where: { id: alert.dispatchRecord.id },
+                            data: { doctorId: availableDoctor.id, vehicleId: vehicle?.id || null }
+                        });
+                    } else {
+                        await tx.dispatchRecord.create({
+                            data: {
+                                alertId: alert.id,
+                                doctorId: availableDoctor.id,
+                                vehicleId: vehicle?.id || null
+                            }
+                        });
+                    }
+                });
+
+                if (io) {
+                    io.to(`alert_${alert.id}`).emit('alertUpdate', {
+                        status: 'DISPATCHED',
+                        assignedDoctor: availableDoctor.fullName
+                    });
+                    io.emit('dispatcherAlertUpdate', { alertId: alert.id, status: 'DISPATCHED' });
+                }
+                console.log(`🔄 Retry Loop: Matched pending alert #${alert.id} to newly available Dr. ${availableDoctor.fullName}`);
+            }
+        }
+    } catch (err) {
+        // Silently catch background worker errors to prevent crashing main thread
     }
 };

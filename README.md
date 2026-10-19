@@ -6,16 +6,17 @@ MedRelay is an integrated healthcare dispatch and emergency response platform bu
 
 ## 🚀 Key Features & Capabilities
 
-- **🆘 One-Tap Bystander SOS & Rate-Limited Dispatch:** Emergency dispatch directly from the homepage using browser GPS coordinates with IP sliding-window rate limiting to prevent spam and denial of service.
-- **📍 Proximity Pre-Filter & Road-Network Navigation:** Computes spherical distance using the Haversine formula as a low-latency spatial candidate filter, coupled with Google Maps turn-by-turn road navigation deep-links to route around physical barriers (rivers, one-way systems, traffic).
-- **🩺 Specialist Safeguards & Explicit Fallback:** Specialization triage (Cardiology, Trauma, Pediatrics, Orthopedics) with a 15 km safe distance ceiling and a 3x proximity ratio cutoff. If a specialist is dangerously far, the system dispatches the closest emergency physician and alerts both patient and doctor of the fallback justification.
+- **🆘 One-Tap Bystander SOS & Rate-Limited Dispatch:** Emergency dispatch directly from the homepage using browser GPS coordinates with IP sliding-window rate limiting (15 requests per 10 minutes) and `app.set('trust proxy', 1)` for cloud reverse proxies (Render) to prevent spam while supporting campus Wi-Fi / CG-NAT gateways.
+- **📍 Dual-Stage Road-Network Dispatch (Haversine + OSRM):** Employs the Haversine formula as a low-latency spatial candidate filter, followed by Open Source Routing Machine (OSRM) driving table queries to re-rank top candidates by true road travel duration (ETA), routing around rivers, railways, and one-way grids. Dispatched doctors receive turn-by-turn Google Maps navigation deep-links.
+- **🩺 Specialist Safeguards with 2 km Proximity Floor:** Specialization triage (Cardiology, Trauma, Pediatrics, Orthopedics) with a 15 km safe ceiling and 3x proximity ratio cutoff. A 2 km floor ensures specialists in close proximity (e.g. 600 m) are not dropped prematurely.
 - **🔒 Race-Condition Elimination via Atomic Transactions:** Doctor availability locking (`isAvailable = false`), emergency vehicle reservation, and alert generation are wrapped in a single database transaction (`prisma.$transaction`), preventing concurrent double-booking.
 - **🚑 Full Response & Hospital Transport Lifecycle:** 
   `PENDING` ➔ `DISPATCHED` (Physician & Ambulance en route) ➔ `TRANSPORTING` (Patient secured; en route to hospital ER) ➔ `COMPLETED` (Clinical handover at hospital). Includes a complete `CANCELLED` flow that immediately releases locked personnel and vehicles.
-- **🏥 Inpatient Ward vs. Field Dispatch:** Automatically differentiates between outdoor field emergencies (dispatching street ambulance + mobile doctor) and admitted inpatient ward calls (direct on-foot response with floor/bed details and zero vehicle locking).
-- **📡 Isolated Real-Time WebSockets:** Targeted Socket.io rooms (`alert_${id}`) isolate patient medical context (blood group, allergies, contact) and doctor GPS streams to only authorized participants.
-- **⏳ GPS Heartbeat & Telemetry Freshness:** 30-minute stale location cutoff (`STALE_TIMEOUT_MS`) prioritizes clinicians with active, recent GPS broadcasts over unresponsive units.
-- **📊 Administrative Analytics & Audit Retention:** Recharts-powered analytics for emergency distribution and response times. Patient deletion performs GDPR/HIPAA-compliant PII redaction while preserving historical dispatch rows and timestamps for clinical audit trails.
+- **🔄 Auto-Retry Loop & Dispatcher Operations Console:** Background retry loop (runs every 15s) automatically matches waiting `PENDING` emergencies when doctors become free, paired with a dedicated Dispatcher Console (`ActiveEmergenciesView`) allowing manual doctor/vehicle reassignment (`PATCH /api/alerts/:id/reassign`).
+- **🏥 Inpatient Ward vs. Field Dispatch:** Differentiates between outdoor field emergencies (dispatching street ambulance + mobile doctor) and admitted inpatient calls (strictly checking `locationType === 'Building'`, matching medical staff linked to that `hospitalId`, with zero vehicle locking).
+- **📡 Cryptographically Authorized WebSockets:** Sockets authenticate via JWT in handshake. Room subscription (`joinAlertRoom`) requires matching roles, participant identity, or a signed cryptographic per-alert `trackingToken`.
+- **⏳ Dedicated GPS Heartbeat & 60s Freshness:** Strict 60-second stale location cutoff (`STALE_TIMEOUT_MS = 60 * 1000`) on a dedicated `lastLocationAt` timestamp excludes stale clinicians from dispatch. Doctors are flipped to `isAvailable = false` automatically upon socket disconnection.
+- **📊 Administrative Analytics & Audit Retention:** Recharts-powered analytics for emergency distribution and response times. Foreign keys use `onDelete: SetNull` on dispatch relations and `onDelete: Restrict` on alerts. Patient deletion performs soft PII redaction, preserving historical dispatch rows and timestamps for statutory clinical audit trails.
 
 ---
 
@@ -38,13 +39,13 @@ MedRelay incorporates specialized database objects directly inside PostgreSQL to
    LEFT JOIN "Vehicle" v ON d."vehicleId" = v.id
    WHERE a.status IN ('PENDING', 'DISPATCHED', 'TRANSPORTING');
    ```
-   Aggregates all active, unresolved alerts across 5 tables into an efficient virtual table for real-time dispatch dashboards.
+   Aggregates all active, unresolved alerts across 5 tables into an efficient virtual table powering the Dispatcher Console.
 
 2. **`AlertStatusAudit` & `trg_log_alert_status` (Database Trigger):**
    Fires `AFTER UPDATE OF status ON "EmergencyAlert"`, inserting `alertId`, `oldStatus`, `newStatus`, and server timestamp (`NOW()`) into an audit ledger for statutory healthcare compliance.
 
 3. **`EmergencyAlertArchive` & `archive_completed_alerts(retention_days)` (Stored Procedure):**
-   Copies resolved alerts older than the retention threshold (default 30 days) into the archive partition without destroying historical records.
+   Executes an atomic move via Common Table Expression (`WITH moved_alerts AS (DELETE FROM ... RETURNING ...) INSERT INTO "EmergencyAlertArchive" ...`) migrating resolved alerts older than the retention threshold into cold storage without duplicate records or data loss.
 
 ---
 
@@ -146,6 +147,8 @@ npm run build
 | `PATCH`| `/api/alerts/:id/cancel` | Patient / Doctor | Cancel emergency; atomically release locked doctor and vehicle |
 | `POST` | `/api/alerts/:id/feedback` | Patient | Submit post-dispatch rating (1-5) and feedback notes |
 | `PATCH`| `/api/doctors/:id/location` | Doctor | Broadcast live GPS coordinates and refresh heartbeat |
+| `GET` | `/api/alerts/active-view` | Admin / Dispatcher | Aggregated active emergencies queue from `ActiveEmergenciesView` |
+| `PATCH`| `/api/alerts/:id/reassign`| Admin / Dispatcher | Manual clinician and vehicle reassignment for active incidents |
 | `PATCH`| `/api/doctors/:id/status` | Doctor | Toggle availability (on-duty / off-duty) |
 | `GET` | `/api/admin/data` | Admin / Dispatcher | View clinicians, patients, and system KPIs |
 | `GET` | `/api/admin/analytics` | Admin / Dispatcher | Aggregated incident metrics, case distribution, and response times |
@@ -154,8 +157,9 @@ npm run build
 
 ---
 
-## 🛡️ Health Data Privacy & Emergency Consent (HIPAA / GDPR)
+## 🛡️ Health Data Privacy & Emergency Consent (DPDP Act 2023 / GDPR / HIPAA)
 
-- **Emergency Medical Exemption:** Emergency data sharing is conducted under statutory life-safety exemptions (HIPAA 45 CFR § 164.512(j) / GDPR Art. 9(2)(c)), sharing vital triage context solely with assigned clinicians.
-- **WebSocket Channel Isolation:** Patient contact information and clinician GPS coordinates are published exclusively into isolated alert rooms (`alert_${alertId}`).
-- **Right to Erasure & Audit Retention:** User deletion performs soft PII redaction (redacting full names, phone numbers, and unstructured clinical notes) while strictly preserving response timestamps and dispatch records in compliance with clinical record retention laws.
+- **Statutory Emergency Exemptions:** MedRelay's emergency workflows are aligned with life-safety exemptions under **India's Digital Personal Data Protection (DPDP) Act 2023 Section 7(b)**, **GDPR Article 9(2)(c)**, and **HIPAA 45 CFR § 164.512(j)**, sharing patient triage records strictly with authorized response teams.
+- **Cryptographic WebSocket Isolation:** Real-time location and clinical context are restricted to authenticated users and signed per-alert tracking tokens (`alert_${alertId}`).
+- **Right to Erasure vs Clinical Audit Retention:** Reconciles GDPR erasure rights with statutory clinical record retention through Soft PII Redaction—overwriting personal identifiers while retaining anonymized dispatch records and timestamps.
+- **Encryption Architecture:** Full in-transit encryption via TLS 1.3 (HTTPS & WSS). At-rest storage encryption managed at the cloud disk volume level (AES-256). Application field-level encryption is not implemented in this prototype.

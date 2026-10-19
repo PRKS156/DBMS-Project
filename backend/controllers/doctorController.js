@@ -33,6 +33,7 @@ exports.updateLocation = async (req, res) => {
             data: {
                 currentLat: lat,
                 currentLng: lng,
+                lastLocationAt: new Date(),
                 isAvailable: true,
                 user: { update: { updatedAt: new Date() } }
             }

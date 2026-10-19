@@ -115,12 +115,21 @@ export default function TrackAmbulance() {
     return () => clearInterval(timer);
   }, []);
 
-  // Socket.io connection
+  // Socket.io connection with signed cryptographic token authentication (Critique #18)
   useEffect(() => {
     if (!alertId) return;
 
-    socketRef.current = io(SOCKET_URL);
-    socketRef.current.emit('joinAlertRoom', alertId);
+    const authToken = searchParams.get('token') || localStorage.getItem('activeTrackingToken') || localStorage.getItem('token');
+    socketRef.current = io(SOCKET_URL, {
+      auth: { token: authToken }
+    });
+
+    socketRef.current.emit('joinAlertRoom', { alertId, token: authToken });
+
+    socketRef.current.on('joinError', (err) => {
+      console.warn('Socket security rejection:', err);
+      setError(err.message || 'Access denied: Valid authorization required to track this emergency.');
+    });
 
     socketRef.current.on('alertUpdate', (data) => {
       if (data.status === 'DISPATCHED') {
@@ -142,7 +151,7 @@ export default function TrackAmbulance() {
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
     };
-  }, [alertId]);
+  }, [alertId, searchParams, navigate]);
 
   // Poll alert status
   useEffect(() => {

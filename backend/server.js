@@ -1,9 +1,15 @@
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const alertRoutes = require('./routes/alertRoutes');
+const prisma = require('./config/db');
+const { retryPendingAlerts } = require('./controllers/alertController');
 require('dotenv').config();
 
 const app = express();
+
+// Critique #8: Trust proxy when behind reverse proxies (Render, Cloudflare, load balancers)
+app.set('trust proxy', 1);
 
 // Open global CORS access parameters so your Vercel cloud frontend can send request vectors securely
 app.use(cors());
@@ -52,19 +58,115 @@ const io = new Server(server, {
     }
 });
 
+// Critique #18: Socket handshake authentication middleware with JWT verification
+io.use((socket, next) => {
+    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretkey');
+            socket.user = decoded;
+        } catch (err) {
+            socket.user = null;
+        }
+    } else {
+        socket.user = null;
+    }
+    next();
+});
+
+// Map active doctor socket connections to their database IDs (Critique #9)
+const activeDoctorSockets = new Map(); // socket.id -> doctorUserId
+
 io.on('connection', (socket) => {
-    console.log(`🔌 New client connected: ${socket.id}`);
-    
-    // Clients can join a room based on their alert ID or userId to receive targeted updates
-    socket.on('joinAlertRoom', (alertId) => {
-        socket.join(`alert_${alertId}`);
-        console.log(`Client joined room: alert_${alertId}`);
+    console.log(`🔌 Client connected: ${socket.id} (Authenticated User: ${socket.user?.userId || 'Anonymous'})`);
+
+    if (socket.user && socket.user.role === 'DOCTOR') {
+        activeDoctorSockets.set(socket.id, socket.user.userId);
+    }
+
+    // Critique #18: Authorized room subscription logic with signed per-alert tracking tokens and RBAC
+    socket.on('joinAlertRoom', async (payload) => {
+        const alertId = typeof payload === 'object' ? payload.alertId : payload;
+        const trackingToken = typeof payload === 'object' ? payload.token : null;
+        const targetId = parseInt(alertId);
+
+        if (isNaN(targetId)) {
+            return socket.emit('joinError', { message: 'Invalid emergency alert ID.' });
+        }
+
+        let isAuthorized = false;
+
+        // 1. Dispatchers and Admins have authorized system-wide emergency oversight
+        if (socket.user && (socket.user.role === 'ADMIN' || socket.user.role === 'DISPATCHER')) {
+            isAuthorized = true;
+        }
+
+        // 2. Validate cryptographic per-alert tracking token (for patients & guest SOS)
+        if (!isAuthorized && trackingToken) {
+            try {
+                const decoded = jwt.verify(trackingToken, process.env.JWT_SECRET || 'supersecretkey');
+                if (decoded.alertId === targetId) {
+                    isAuthorized = true;
+                }
+            } catch (err) {
+                // Invalid or expired tracking token
+            }
+        }
+
+        // 3. Validate authenticated participant (assigned doctor or patient owner)
+        if (!isAuthorized && socket.user) {
+            try {
+                const dispatch = await prisma.dispatchRecord.findUnique({
+                    where: { alertId: targetId },
+                    include: { doctor: true, alert: { include: { patient: true } } }
+                });
+                if (dispatch) {
+                    if (dispatch.doctor?.userId === socket.user.userId || dispatch.alert?.patient?.userId === socket.user.userId) {
+                        isAuthorized = true;
+                    }
+                }
+            } catch (err) {}
+        }
+
+        // Allow join if authorized or in dev mode, reject unauthorized eavesdroppers
+        if (isAuthorized || process.env.NODE_ENV !== 'production') {
+            socket.join(`alert_${targetId}`);
+            socket.emit('joinedAlertRoom', { alertId: targetId, authorized: isAuthorized });
+            console.log(`🔒 Authorized room join: alert_${targetId} by socket ${socket.id}`);
+        } else {
+            socket.emit('joinError', { message: 'Access denied: Valid emergency tracking authorization token required.' });
+            console.warn(`⛔ Unauthorized room join rejected: alert_${targetId} from ${socket.id}`);
+        }
     });
 
-    socket.on('disconnect', () => {
+    // Critique #9: Mark doctor unavailable upon socket disconnection
+    socket.on('disconnect', async () => {
         console.log(`🔌 Client disconnected: ${socket.id}`);
+        const doctorUserId = activeDoctorSockets.get(socket.id);
+        if (doctorUserId) {
+            activeDoctorSockets.delete(socket.id);
+            // Check if doctor has any other active open sockets
+            const stillConnected = Array.from(activeDoctorSockets.values()).includes(doctorUserId);
+            if (!stillConnected) {
+                try {
+                    await prisma.doctorProfile.updateMany({
+                        where: { userId: doctorUserId },
+                        data: { isAvailable: false }
+                    });
+                    io.emit('doctorStatusUpdate', { doctorId: doctorUserId, isAvailable: false });
+                    console.log(`📵 Doctor #${doctorUserId} disconnected: Availability flipped to offline/unavailable.`);
+                } catch (e) {
+                    console.error('Error marking disconnected doctor offline:', e.message);
+                }
+            }
+        }
     });
 });
+
+// Critique #7: Background retry loop for unassigned PENDING alerts (runs every 15s)
+setInterval(() => {
+    retryPendingAlerts(io);
+}, 15000);
 
 // Make io accessible in controllers
 app.locals.io = io;

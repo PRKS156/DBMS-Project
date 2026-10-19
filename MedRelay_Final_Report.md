@@ -126,7 +126,7 @@ Because these channels operate independently, data handoffs are manual and error
 3. **No Dynamic Telemetry Integration:** Static street addresses are used rather than live device GPS, leading to navigation errors when patients are in unfamiliar or outdoor locations.
 4. **Absence of Fallback Intelligence:** Inability to balance clinical specialism against travel distance, leading to dangerous delays when a requested specialist is too distant.
 5. **Vulnerability to Telemetry Staleness:** Responders who lose network connectivity remain eligible for dispatch, causing unanswered calls.
-6. **Regulatory Non-Compliance:** Lack of structured state transition auditing, tamper-proof logs, and GDPR/HIPAA-compliant data redaction.
+6. **Regulatory Governance & Audit Gaps:** Lack of structured state transition auditing, tamper-proof logs, and data redaction aligned with privacy statutes (India DPDP Act 2023, GDPR, HIPAA).
 
 ---
 
@@ -136,25 +136,19 @@ MedRelay resolves these systemic deficiencies by uniting a normalized relational
 
 Key pillars of the proposed platform include:
 - **Atomic Resource Commit:** Allocating an emergency alert, locking doctor availability (`isAvailable = false`), and reserving an emergency vehicle are executed within an atomic database transaction (`prisma.$transaction`), completely eliminating double-booking race conditions.
-- **Hierarchical Spatial Dispatch:** Employs the Haversine formula as a lightweight computational pre-filter to rank available clinicians, enforced with a 15 km specialist distance ceiling and a 3x proximity ratio limit. Road-network turn-by-turn navigation is deep-linked via Google Maps for actual street travel around physical obstacles.
+- **Hierarchical Spatial Dispatch & Road-Network Verification:** Employs the Haversine formula as a lightweight computational pre-filter ($O(N)$) to prune candidate doctors, followed by Open Source Routing Machine (OSRM) driving table queries to rank top candidates by true road travel duration (ETA). This prevents dispatching doctors who are geographically close in straight-line distance but separated by unbridged rivers, railway lines, or congested one-way systems.
 - **Comprehensive Lifecycle Tracking:** Models the complete clinical workflow: `PENDING` ➔ `DISPATCHED` ➔ `TRANSPORTING` ➔ `COMPLETED` (or `CANCELLED`), ensuring visibility from initial trigger through scene triage, hospital transport, and final clinical handover.
-- **Dual-Mode Response Logic:** Differentiates between outdoor field emergencies (dispatching a mobile doctor deployed aboard an emergency ambulance) and inpatient ward emergencies (direct on-foot response within the facility, bypassing vehicle reservation).
-- **Proactive Abuse Mitigation:** Implements an in-memory sliding-window IP rate limiter (maximum 5 requests per 10 minutes) on emergency endpoints to mitigate denial-of-service spam.
+- **Dual-Mode Response Logic:** Differentiates between outdoor field emergencies (dispatching a mobile doctor deployed aboard an emergency ambulance) and inpatient ward emergencies (direct on-foot response within the facility, matching clinicians linked to the specific hospital, bypassing vehicle reservation).
+- **Proactive Abuse Mitigation & Reverse Proxy Trust:** Implements an in-memory sliding-window IP rate limiter (15 requests per 10 minutes, configured with `app.set('trust proxy', 1)` to handle reverse proxies such as Render) to mitigate denial-of-service spam while accommodating legitimate multi-user traffic from campus Wi-Fi or Carrier-Grade NAT (CG-NAT).
 
 ---
 
 ## 7. Database Design, Normalization, and Integrity Constraints
 
-### 7.1 Normalization and 3NF Design
-The database structure was designed to adhere to Third Normal Form (3NF) across eight core entities, eliminating update anomalies and minimizing data duplication:
-- **First Normal Form (1NF):** Every attribute contains atomic values with unique column names and primary keys identifying every record. *Engineering Discussion on Medical History:* In practical clinical informatics, `medicalHistory` is stored as an unstructured triage summary note (e.g., "Hypertension, Penicillin Allergy") for immediate, rapid comprehension by responding clinicians during acute crisis triage. In a fully decomposed theoretical schema, this is modeled as an `Allergy` entity and a `PatientAllergy` junction table (`patientId`, `allergen`, `severity`). MedRelay adopts the unstructured clinical triage note to guarantee sub-second delivery to mobile devices without requiring complex multi-table joins during emergency rendering.
-- **Second Normal Form (2NF):** All non-key attributes are fully functionally dependent on the primary key, avoiding partial dependencies.
-- **Third Normal Form (3NF):** Transitive dependencies are removed. Hospital details reside in `Hospital`, vehicle details in `Vehicle`, user credentials in `User`, and clinician attributes in `DoctorProfile`.
-
-### 7.2 Derived State and Synchrony
-A critical concern in emergency systems is the synchronization of derived status flags, such as `DoctorProfile.isAvailable`. If a clinician is dispatched, their availability flag must not go out of sync with active dispatch records. MedRelay enforces consistency through two complementary layers:
-1. **Atomic Transaction Updates:** Any alert creation atomically flips `DoctorProfile.isAvailable = false` and `Vehicle.isAvailable = false`.
-2. **Relational Query Verification:** The candidate doctor query does not rely solely on the boolean flag; it explicitly verifies that the clinician has no ongoing dispatches in unresolved states:
+### 7.1 Pragmatic Normalization and Deliberate Denormalization
+Rather than dogmatically enforcing Third Normal Form (3NF) across all entities at the cost of emergency latency, MedRelay establishes a structured relational core across eight primary entities (`User`, `DoctorProfile`, `PatientProfile`, `Hospital`, `Vehicle`, `EmergencyAlert`, `DispatchRecord`, `Feedback`) while deliberately adopting **pragmatic denormalization** in three critical operational areas:
+1. **Unstructured Clinical Triage Summaries (`PatientProfile.medicalHistory`):** In theoretical 3NF, patient allergies, chronic conditions, and surgical histories would be decomposed into separate `Condition`, `Allergy`, and `PatientAllergy` junction tables with foreign keys and severity ratings. In acute cardiac arrest or polytrauma triage, joining four tables across mobile network connections introduces unacceptable query latency and potential failure points. Storing an unstructured triage summary (e.g., *"Hypertension, Penicillin Allergy, Stent 2021"*) provides responding clinicians with an instantaneous, human-readable clinical briefing in a single payload.
+2. **Denormalized Availability Flags with Relational Verification:** `DoctorProfile.isAvailable` and `Vehicle.isAvailable` are maintained as denormalized boolean flags for ultra-fast $O(1)$ spatial pre-filtering. To eliminate the risk of cached flags drifting out of sync with real-world dispatches, the dispatch engine combines the boolean flag with relational query verification:
    ```prisma
    dispatches: {
        none: {
@@ -164,14 +158,23 @@ A critical concern in emergency systems is the synchronization of derived status
        }
    }
    ```
-   This ensures that even if an in-memory state fluctuates, the relational database guarantees zero double-booking.
+3. **Immutable Incident Snapshots (`EmergencyAlert.description`):** Triage category, hospital name, room/floor details, and landmarks are snapshot directly into the alert description upon creation. If a hospital subsequently renames a ward or room in administrative tables, the legal dispatch record accurately reflects the exact physical coordinates and location instructions delivered to the response team at the time of dispatch.
 
-### 7.3 Referential Integrity and Soft PII Redaction
-While cascade deletion (`onDelete: Cascade`) is appropriate for ephemeral authentication tokens or test setups, permanently deleting clinician or patient rows in healthcare destroys legal audit history and violates clinical record retention mandates (e.g., statutory 7-year medical incident retention). 
+### 7.2 Derived State and Concurrency Control
+A critical vulnerability in healthcare dispatch systems is race-condition double-booking during surge events (e.g., mass casualty incidents or campus accidents). MedRelay enforces absolute concurrency control through PostgreSQL ACID transactions via `prisma.$transaction`:
+- The clinician's availability is atomically locked (`isAvailable = false`).
+- If an outdoor emergency, the ambulance unit is atomically reserved (`isAvailable = false`).
+- The `EmergencyAlert` and linked `DispatchRecord` are committed simultaneously. If any step fails or a concurrent transaction claims the clinician, the entire transaction rolls back cleanly.
 
-MedRelay resolves this by replacing destructive cascade deletions with **Compliance-Driven PII Redaction** (`adminController.deletePatient`):
-- When an erasure request is executed under GDPR Art. 17 (Right to Erasure), personal identifiers (`fullName`, `phoneNumber`, `medicalHistory`, and user email) are permanently redacted.
-- Historical `EmergencyAlert` and `DispatchRecord` records are strictly preserved with their original timestamps and response metrics, maintaining statistical integrity and clinical audit trails.
+### 7.3 Referential Integrity, Schema-Level Constraints, and Soft PII Redaction
+In early prototype designs, foreign key relations often utilize cascade deletion (`onDelete: Cascade`). However, in production healthcare environments, deleting a user or physician must **never** destroy historical dispatch records:
+- **Schema-Level Constraints:** In `backend/prisma/schema.prisma`, `DispatchRecord` foreign keys to `DoctorProfile`, `Vehicle`, and `Hospital` are strictly configured with `onDelete: SetNull`. If a clinician account is retired or deleted, the `DispatchRecord` remains fully intact with an immutable timestamp, patient reference, and emergency metrics, setting `doctorId = NULL`. Similarly, `EmergencyAlert.patient` is configured with `onDelete: Restrict` to prevent deletion of patient profiles that possess active or historical clinical incidents.
+- **The Legal Tension Between GDPR and Medical Record Retention:** 
+  - **GDPR Article 17** grants data subjects a "Right to Erasure" (Right to be Forgotten).
+  - Conversely, healthcare regulations (such as HIPAA in the United States, the National Medical Commission guidelines, and Clinical Establishments Acts in India) mandate statutory medical record retention (typically 5 to 7 years for clinical and medico-legal incidents) with **no general right of destruction**.
+- **Resolution via Compliance-Driven Soft PII Redaction:** MedRelay harmonizes these opposing legal requirements in `adminController.deletePatient`:
+  - Direct personal identifiers (`fullName` ➔ `[REDACTED PATIENT]`, `phoneNumber` ➔ `N/A`, `medicalHistory` ➔ `[REDACTED FOR COMPLIANCE]`, and user email ➔ anonymized hash) are permanently overwritten.
+  - The underlying `EmergencyAlert` and `DispatchRecord` rows are preserved with their original timestamps, response durations, and anonymized clinical categories, maintaining statutory compliance and audit integrity without violating patient privacy.
 
 ---
 
@@ -179,15 +182,15 @@ MedRelay resolves this by replacing destructive cascade deletions with **Complia
 
 The relational schema comprises eight primary entities managed through PostgreSQL:
 
-| Entity | Primary Key | Foreign Keys & Unique Constraints | Key Attributes |
+| Entity | Primary Key | Foreign Keys & Constraints | Key Attributes |
 | :--- | :--- | :--- | :--- |
 | **`User`** | `id` (Int) | `email` (UNIQUE) | `password` (bcrypt), `role` (`Role` ENUM), `createdAt`, `updatedAt` |
-| **`DoctorProfile`** | `id` (Int) | `userId` (FK → `User.id`, UNIQUE) | `fullName`, `specialization`, `phoneNumber`, `isAvailable`, `currentLat`, `currentLng` |
+| **`DoctorProfile`** | `id` (Int) | `userId` (FK → `User.id`, UNIQUE), `hospitalId` (FK → `Hospital.id`) | `fullName`, `specialization`, `phoneNumber`, `isAvailable`, `currentLat`, `currentLng`, `lastLocationAt` |
 | **`PatientProfile`** | `id` (Int) | `userId` (FK → `User.id`, UNIQUE) | `fullName`, `phoneNumber`, `age`, `gender`, `bloodGroup`, `medicalHistory` |
 | **`Hospital`** | `id` (Int) | – | `name`, `address`, `latitude`, `longitude`, `contactNumber` |
 | **`Vehicle`** | `id` (Int) | `licensePlate` (UNIQUE) | `type` (ALS/BLS), `isAvailable` |
-| **`EmergencyAlert`** | `id` (Int) | `patientId` (FK → `PatientProfile.id`) | `latitude`, `longitude`, `status` (`AlertStatus` ENUM), `description`, `createdAt`, `updatedAt` |
-| **`DispatchRecord`** | `id` (Int) | `alertId` (UNIQUE), `doctorId`, `vehicleId`, `hospitalId` | `dispatchedAt`, `completedAt` |
+| **`EmergencyAlert`** | `id` (Int) | `patientId` (FK → `PatientProfile.id`, `onDelete: Restrict`) | `latitude`, `longitude`, `status` (`AlertStatus` ENUM), `description`, `createdAt`, `updatedAt` |
+| **`DispatchRecord`** | `id` (Int) | `alertId` (FK, `onDelete: Restrict`), `doctorId` (`onDelete: SetNull`), `vehicleId` (`onDelete: SetNull`), `hospitalId` (`onDelete: SetNull`) | `dispatchedAt`, `completedAt` |
 | **`Feedback`** | `id` (Int) | `dispatchRecordId` (UNIQUE), `userId` (FK) | `rating` (1–5), `comments`, `createdAt` |
 
 *Table 2: Entity Schema and Relational Constraints*
@@ -209,10 +212,26 @@ enum AlertStatus {
   CANCELLED
 }
 
+model DoctorProfile {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName       String
+  specialization String
+  phoneNumber    String
+  isAvailable    Boolean   @default(true)
+  currentLat     Float?
+  currentLng     Float?
+  lastLocationAt DateTime?
+  hospitalId     Int?
+  hospital       Hospital? @relation(fields: [hospitalId], references: [id])
+  dispatches     DispatchRecord[]
+}
+
 model EmergencyAlert {
   id             Int             @id @default(autoincrement())
   patientId      Int
-  patient        PatientProfile  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient        PatientProfile  @relation(fields: [patientId], references: [id], onDelete: Restrict)
   latitude       Float
   longitude      Float
   status         AlertStatus     @default(PENDING)
@@ -224,40 +243,69 @@ model EmergencyAlert {
 
   @@index([status])
 }
+
+model DispatchRecord {
+  id           Int            @id @default(autoincrement())
+  alertId      Int            @unique
+  alert        EmergencyAlert @relation(fields: [alertId], references: [id], onDelete: Restrict)
+  doctorId     Int?
+  doctor       DoctorProfile? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  hospitalId   Int?
+  hospital     Hospital?      @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  vehicleId    Int?
+  vehicle      Vehicle?       @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  dispatchedAt DateTime       @default(now())
+  completedAt  DateTime?
+}
 ```
 
 ---
 
 ## 9. Real-time Dispatch Workflow and Logic Architecture
 
-The dispatch lifecycle executes through an automated, atomic five-stage pipeline:
+The dispatch lifecycle executes through an automated, atomic six-stage pipeline with background retry:
 
 ```
-[Patient SOS] ➔ [Rate Limiter] ➔ [Spatial Pre-filter] ➔ [Specialist Guard] ➔ [Atomic Transaction]
-                                                                                      │
-  ┌─────────────────────────────── Life Cycle Flow ───────────────────────────────────┘
-  ▼
+[Patient SOS] ➔ [Rate Limiter] ➔ [Spatial Pre-filter] ➔ [OSRM Road Routing] ➔ [Specialist Guard] ➔ [Atomic Transaction]
+                                                                                                        │
+   ┌─────────────────────────────── Life Cycle Flow ────────────────────────────────────────────────────┘
+   ▼
 [PENDING] ➔ [DISPATCHED (Doctor Acknowledges)] ➔ [TRANSPORTING (En Route to Hospital)] ➔ [COMPLETED]
-  │
-  └───────➔ [CANCELLED (Atomic Resource Release: Doctor & Ambulance freed)]
+   │
+   ├───────➔ [CANCELLED (Atomic Resource Release: Doctor & Ambulance freed)]
+   │
+   └───────➔ [Background Retry Loop: 15s auto-reassignment / Dispatcher Console manual intervention]
 ```
 
-### Step 1 – Ingestion & Abuse Mitigation
-Incoming SOS triggers pass through an IP sliding-window rate limiter (5 requests / 10 minutes). Requests exceeding the threshold are blocked with HTTP 429 and immediate guidance to dial national emergency hotlines (112 / 108).
+### Step 1 – Ingestion, Reverse Proxy Trust & Rate Limiting
+Incoming SOS triggers pass through an IP sliding-window rate limiter configured for 15 requests per 10-minute window (`RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000`). 
+- **Reverse Proxy Handling:** Because MedRelay's backend is hosted on cloud infrastructure (Render) behind reverse proxies, `app.set('trust proxy', 1)` is enabled in `server.js` so `req.headers['x-forwarded-for']` accurately identifies the genuine client IP rather than mapping all users to Render's load balancer.
+- **NAT Gateway Tolerance:** The 15-request threshold accommodates legitimate multi-user emergencies originating from shared campus Wi-Fi or Carrier-Grade NAT (CG-NAT) mobile gateways without triggering false denials of service.
+- **Architectural Note:** In this deployment, the rate limiter uses an in-memory sliding window, meaning counters reset upon container restarts. In production, this would be backed by a distributed Redis instance.
 
-### Step 2 – Proximity Pre-Filtering & GPS Heartbeat Verification
-Available doctors are queried with relational exclusion of active dispatches. The system verifies GPS telemetry freshness:
+### Step 2 – Proximity Pre-Filtering & Strict GPS Telemetry Freshness
+Available doctors are queried with relational exclusion of active dispatches. The system enforces strict GPS telemetry freshness:
 ```javascript
-const STALE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const isFreshGPS = doc.user?.updatedAt ? (now - new Date(doc.user.updatedAt).getTime() < STALE_TIMEOUT_MS) : false;
+const STALE_TIMEOUT_MS = 60 * 1000; // Strict 60-second freshness window
+const now = Date.now();
+const freshDoctors = availableDoctors.filter(d => 
+    d.lastLocationAt && (now - new Date(d.lastLocationAt).getTime() < STALE_TIMEOUT_MS)
+);
 ```
-Clinicians with active, recent GPS broadcasts are prioritized over stale or offline coordinates, preventing dispatch to abandoned or dead devices.
+- **Dedicated Telemetry Heartbeat:** Unlike relying on `User.updatedAt` (which can be falsely refreshed by profile edits or password updates), MedRelay uses a dedicated `lastLocationAt` timestamp updated exclusively when valid GPS coordinates are broadcast (`PATCH /api/doctors/:id/location`).
+- **Exclusion of Stale Units:** Responders with stale telemetry (> 60 seconds) are excluded from automatic candidate matching, preventing dispatch to offline or unresponsive mobile devices.
+- **Socket Disconnect Cleanup:** In `server.js`, whenever a clinician's WebSocket disconnects, `activeDoctorSockets` tracking immediately updates `DoctorProfile.isAvailable = false`, preventing phantom dispatches.
 
-### Step 3 – Specialist Proximity Safeguards & Explicit Fallback
-When a patient requests a specialization (e.g., Cardiology):
-1. The system computes distance to all matching specialists and the closest emergency general physician.
-2. If the nearest specialist exceeds the absolute safety ceiling (`MAX_SPECIALIST_DISTANCE_METERS = 15000` metres) OR exceeds three times the distance of the closest emergency general physician, the system falls back to the nearest emergency physician.
-3. The alert is explicitly tagged: `isFallback: true` with a detailed clinical rationale (`fallbackReason`), rendered prominently in yellow warning banners on both the doctor and patient consoles.
+### Step 3 – Specialist Proximity Safeguards with 2 km Distance Floor
+When a patient requests a specialized clinical category (e.g., Cardiology, Trauma Surgery):
+1. The engine computes distance to all matching specialists and the closest emergency general physician.
+2. **The 2 km Ratio Floor:** Standard 3x distance ratio rules suffer from edge-case failures at short distances (e.g., a specialist 600 m away versus a generalist 150 m away triggers a 4x ratio, prematurely dropping the specialist). MedRelay enforces a 2 km floor:
+   ```javascript
+   const isSpecialistClose = nearestSpecialist.distance_meters <= 2000;
+   const ratioOk = isSpecialistClose || (nearestSpecialist.distance_meters <= closestGeneralDoctor.distance_meters * 3);
+   ```
+3. If the nearest specialist is within 2 km, their specialized expertise is preserved. The 3x fallback is invoked only if the specialist is both farther than 2 km and exceeds three times the distance of the closest emergency general physician (or exceeds `MAX_SPECIALIST_DISTANCE_METERS = 15000` m).
+4. If fallback occurs, the alert is marked `isFallback: true` with a clear clinical rationale displayed in prominent warning banners on doctor and patient consoles.
 
 ### Step 4 – Atomic Resource Locking (`prisma.$transaction`)
 The system creates the `EmergencyAlert`, links the `DispatchRecord`, marks `DoctorProfile.isAvailable = false`, and reserves an available ambulance in a single ACID transaction:
@@ -269,29 +317,42 @@ const result = await prisma.$transaction(async (tx) => {
         await tx.vehicle.update({ where: { id: allocatedVehicle.id }, data: { isAvailable: false } });
     }
     const dispatch = await tx.dispatchRecord.create({ ... });
-    return { alert, dispatch };
+    return { alert, vehicle, dispatch };
 });
 ```
 
-### Step 5 – Mobile Team Model & Ward Handling
-For street emergencies, the doctor is deployed on-board the allocated ambulance unit (e.g., `TN-23-EM-0108`, ALS). The doctor's smartphone GPS serves as the real-time telemetry transponder beacon for the vehicle en route to the scene. For indoor/ward alerts, street ambulance allocation is bypassed (`allocatedVehicle = null`), and the doctor is instructed for immediate on-foot ward arrival.
+### Step 5 – Dual-Mode Response & Indoor Hospital Staff Matching
+- **Explicit Location Type Check:** Indoor mode is triggered strictly by `locationType === 'Building'`, preventing an outdoor user who notes a floor or landmark from accidentally losing ambulance allocation.
+- **Inpatient Ward Dispatch:** For indoor calls, street ambulance reservation is bypassed (`allocatedVehicle = null`). The query specifically prioritizes clinicians linked to that hospital (`doctorWhere.hospitalId = parseInt(hospitalId)`), routing the alert directly to on-duty staff inside that medical centre for immediate on-foot ward arrival.
+- **Outdoor Field Dispatch:** For street emergencies, an Advanced or Basic Life Support ambulance is reserved, and the clinician is dispatched aboard the unit.
 
 ### Step 6 – Hospital Transport & Safe Cancellation
-- **Hospital Transport (`TRANSPORTING`):** When the patient is stabilized on scene, the doctor initiates transport via `PATCH /api/alerts/:id/transport`. The patient and hospital receive live tracking of the ambulance's transit to the emergency department.
-- **Cancellation (`CANCELLED`):** If an alert is cancelled by the patient or clinician, `PATCH /api/alerts/:id/cancel` immediately frees both the clinician (`isAvailable = true`) and the vehicle (`isAvailable = true`), restoring fleet capacity.
+- **Hospital Transport (`TRANSPORTING`):** When the patient is stabilized on scene, the clinician initiates transport via `PATCH /api/alerts/:id/transport`. Both patient and hospital emergency department track transit in real time.
+- **Safe Cancellation (`CANCELLED`):** If an alert is cancelled by the patient or clinician, `PATCH /api/alerts/:id/cancel` immediately frees both the clinician (`isAvailable = true`) and the vehicle (`isAvailable = true`), restoring fleet capacity.
+
+### Step 7 – Background Retry Worker & Dispatcher Console Intervention
+- **Automated Retry Loop (`retryPendingAlerts`):** If an alert cannot immediately match a clinician (due to fleet saturation), it enters `PENDING` status. A background worker running every 15 seconds checks for pending alerts and automatically pairs them with newly freed clinicians.
+- **Dispatcher Operations Console:** The dedicated Dispatcher UI renders `ActiveEmergenciesView` in real time, allowing dispatchers to manually reassign clinicians or vehicles (`PATCH /api/alerts/:id/reassign`) to override automated allocations during complex crisis situations.
 
 ---
 
-## 10. Geolocation, Spatial Pre-filtering, and Road Navigation
+## 10. Geolocation, Spatial Pre-filtering, and Road-Network Navigation
 
-### 10.1 The Role of the Haversine Formula
+### 10.1 The Topographical Limitation of Straight-Line Distance
 The Haversine formula calculates the great-circle spherical distance between two points on the Earth's surface:
 $$d = 2R \arcsin \left( \sqrt{\sin^2\left(\frac{\Delta \phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta \lambda}{2}\right)} \right)$$
 
 *Engineering Clarification on Spatial Routing:*
-Over municipal city distances (< 10 km), the spherical curvature error compared to flat-plane Euclidean geometry is computationally negligible (< 0.1%). However, great-circle distance is not travel distance—a clinician 1 km away across an unbridged river, railway line, or complex one-way road system may take 25 minutes to arrive, whereas a clinician 3 km away on a direct highway arrives in 5 minutes. 
+Over municipal city distances (< 10 km), spherical curvature error compared to flat-plane Euclidean geometry is computationally negligible (< 0.1%). However, great-circle distance is **fundamentally not travel distance**. A clinician positioned 1 km away across an unbridged river, elevated railway corridor, or complex one-way traffic system may take 25 minutes to arrive by road, whereas a clinician 3 km away on a direct radial highway arrives in under 5 minutes. Selecting emergency responders purely by straight-line distance risks critical, life-threatening delays.
 
-MedRelay uses the Haversine formula strictly as a **low-latency $O(N)$ candidate pre-filter** to rapidly prune hundreds of regional doctors down to the nearest candidates. Real-time road navigation, turn-by-turn routing, and live road-network ETAs are provided via embedded Google Maps Navigation deep-links (`https://www.google.com/maps/dir/?api=1&destination=...`) integrated directly into the clinician's mobile dispatch console.
+### 10.2 Dual-Stage Dispatch Architecture (Haversine + OSRM Table Routing)
+To resolve this without introducing high-latency API bottlenecks, MedRelay implements an intelligent two-stage dispatch ranking algorithm:
+1. **Stage 1 – Low-Latency $O(N)$ Candidate Pre-filtering:** The database uses the Haversine formula to compute straight-line distances from the incident coordinates to all active, available clinicians within seconds, quickly filtering out hundreds of regional doctors to identify the closest candidate cohort.
+2. **Stage 2 – Road-Network Driving Duration Re-ranking (OSRM):** The top 3 to 5 candidate clinicians are passed to the Open Source Routing Machine (OSRM) driving table API (`/table/v1/driving/` via `geoUtils.getRoadRoutingTable`):
+   - OSRM calculates real-world street network driving distances (`roadDistanceMeters`) and expected travel durations (`roadDurationSeconds`) factoring in actual roadway geometry, bridge crossings, and one-way traffic networks.
+   - The candidate clinicians are re-sorted by true road ETA (`roadDurationSeconds`). The responder who can physically reach the patient fastest is selected for dispatch.
+   - **Fault-Tolerant Fallback:** To ensure emergency dispatch never hangs if external routing infrastructure experiences network latency, OSRM queries enforce a strict 2.5-second timeout via `AbortController`. If the routing API times out or fails, the algorithm gracefully falls back to Haversine straight-line ranking without dropping the emergency.
+3. **Turn-by-Turn Mobile Navigation:** Once dispatched, embedded Google Maps navigation deep-links (`https://www.google.com/maps/dir/?api=1&destination=...`) are provided on the doctor’s mobile terminal, enabling instant hand-off to native turn-by-turn driving directions.
 
 ---
 
@@ -299,8 +360,8 @@ MedRelay uses the Haversine formula strictly as a **low-latency $O(N)$ candidate
 
 MedRelay implements native PostgreSQL database objects to ensure operational performance, data integrity, and compliance:
 
-### 11.1 `ActiveEmergenciesView` (Database View)
-Dispatchers require continuous visibility into unresolved emergencies. Rather than having the application repeatedly execute complex multi-table joins with filtering clauses, `ActiveEmergenciesView` aggregates ongoing incidents:
+### 11.1 `ActiveEmergenciesView` & Dispatcher Operations Console (Database View)
+Emergency dispatchers require continuous, sub-second visibility into unresolved incidents. Rather than having application instances repeatedly execute complex 5-table joins across high-frequency dashboard polling intervals, `ActiveEmergenciesView` aggregates live operational data:
 ```sql
 CREATE OR REPLACE VIEW "ActiveEmergenciesView" AS
 SELECT 
@@ -329,7 +390,7 @@ LEFT JOIN "Hospital" h ON d."hospitalId" = h.id
 LEFT JOIN "Vehicle" v ON d."vehicleId" = v.id
 WHERE a.status IN ('PENDING', 'DISPATCHED', 'TRANSPORTING');
 ```
-*Alignment Note:* The view accurately reflects all active, ongoing emergencies across `PENDING`, `DISPATCHED`, and `TRANSPORTING` statuses, ensuring that clinicians currently in transit remain fully visible on dispatcher dashboards.
+*Operational Integration:* The view accurately reflects all active, ongoing emergencies across `PENDING`, `DISPATCHED`, and `TRANSPORTING` statuses. On the frontend, this view directly powers the **Dispatcher Operations Console**, providing live queue status badges and an interactive clinician reassignment modal (`PATCH /api/alerts/:id/reassign`) for manual dispatcher overrides.
 
 ### 11.2 `AlertStatusAudit` & `trg_log_alert_status` (Database Trigger)
 Rather than duplicating Prisma's built-in `@updatedAt` timestamp handling, MedRelay implements an immutable audit trigger to log every status transition across the emergency lifecycle:
@@ -360,8 +421,8 @@ FOR EACH ROW EXECUTE FUNCTION log_alert_status_change();
 ```
 This guarantees an unalterable chronological audit record of when every status transition occurred, providing tamper-proof evidence for clinical review.
 
-### 11.3 `EmergencyAlertArchive` & Stored Procedure (Automated Archiving)
-Deleting resolved emergency records after 30 days violates healthcare record-retention statutes. MedRelay introduces a dedicated `EmergencyAlertArchive` table and a stored procedure that migrates resolved alerts past the retention threshold into cold storage:
+### 11.3 `EmergencyAlertArchive` & Atomic Stored Procedure (Cold-Storage Archiving)
+Deleting resolved emergency records after 30 days violates statutory healthcare retention rules. MedRelay introduces a dedicated `EmergencyAlertArchive` cold-storage archive table and a stored procedure that executes an **atomic move** using Common Table Expressions (CTE):
 ```sql
 CREATE TABLE IF NOT EXISTS "EmergencyAlertArchive" (
     id INTEGER PRIMARY KEY,
@@ -377,48 +438,83 @@ CREATE TABLE IF NOT EXISTS "EmergencyAlertArchive" (
 CREATE OR REPLACE PROCEDURE archive_completed_alerts(retention_days INT DEFAULT 30)
 LANGUAGE plpgsql AS $$
 BEGIN
+    WITH moved_alerts AS (
+        DELETE FROM "EmergencyAlert"
+        WHERE status = 'COMPLETED'
+          AND "updatedAt" < NOW() - (retention_days || ' days')::INTERVAL
+        RETURNING id, "patientId", latitude, longitude, status::text, description, "createdAt", NOW()
+    )
     INSERT INTO "EmergencyAlertArchive" (id, "patientId", latitude, longitude, status, description, "createdAt", "archivedAt")
-    SELECT id, "patientId", latitude, longitude, status::text, description, "createdAt", NOW()
-    FROM "EmergencyAlert"
-    WHERE status = 'COMPLETED'
-      AND "updatedAt" < NOW() - (retention_days || ' days')::INTERVAL
+    SELECT id, "patientId", latitude, longitude, status, description, "createdAt", NOW()
+    FROM moved_alerts
     ON CONFLICT (id) DO NOTHING;
-
-    DELETE FROM "EmergencyAlert"
-    WHERE status = 'COMPLETED'
-      AND "updatedAt" < NOW() - (retention_days || ' days')::INTERVAL;
 END;
 $$;
 ```
-This ensures high query performance on active operational tables while retaining full historical records in the archive partition.
+*Engineering Distinction:* Rather than separate `INSERT` and `DELETE` queries (which could fail halfway and leave duplicated or orphaned records), the `DELETE ... RETURNING` pattern executes the transfer as an atomic, idempotent operation within PostgreSQL. This preserves full historical records in the archive table while keeping the active operational table lean and responsive.
 
 ---
 
 ## 12. Security, Health Data Privacy, and Statutory Compliance
 
-### 12.1 HIPAA & GDPR Emergency Medical Exemptions
-Emergency medical dispatch operates under strict legal frameworks governing protected health information:
-- **HIPAA 45 CFR § 164.512(j):** Disclosure of protected health information is permitted without prior individual authorization to avert serious and imminent threats to health or safety.
-- **GDPR Article 9(2)(c):** Processing of special category health data is legally permitted when processing is necessary to protect the vital interests of the data subject or another natural person where the subject is physically incapable of giving consent.
+### 12.1 Statutory Emergency Frameworks & Privacy Alignment
+Emergency medical dispatch operates under strict legal frameworks governing protected health information. MedRelay's emergency dispatch protocols are designed with reference to and aligned with statutory life-safety exemptions:
+- **Digital Personal Data Protection (DPDP) Act 2023 (India) Section 7(b):** Authorizes the processing of personal data without prior consent for responding to medical emergencies involving a threat to the life or immediate serious threat to the health of the data subject.
+- **GDPR Article 9(2)(c):** Authorizes the processing of special category personal health data where processing is necessary to protect the vital interests of the data subject or another natural person, and the data subject is physically or legally incapable of giving consent.
+- **HIPAA 45 CFR § 164.512(j):** Authorizes disclosures of protected health information without prior authorization to avert serious and imminent threats to health or safety.
 
-MedRelay collects explicit emergency consent on registration and displays prominent compliance disclosures upon SOS dispatch, notifying users that live coordinates and medical histories are shared strictly with the assigned clinical response unit.
+*Compliance Reality & Encryption Architecture:*
+MedRelay is aligned with these principles rather than claiming unverified statutory certification. 
+- **In-Transit Encryption:** All application traffic and WebSocket streams are strictly encrypted in transit via TLS 1.3 (HTTPS and WSS).
+- **At-Rest Storage Encryption:** Database persistence is encrypted at the volume layer via managed cloud infrastructure (AWS EBS / Supabase AES-256). 
+- *Architectural Limitation:* Application-level column-level cryptographic hashing (e.g. `pgcrypto` field-level encryption for clinical notes) is not implemented in this prototype; clinical notes rely on database role-level permissions and transport encryption.
 
-### 12.2 WebSocket Room Isolation
-To prevent unauthorized access to sensitive medical data (blood group, phone numbers, allergies) and live clinician GPS coordinates, MedRelay enforces strict room-level isolation:
+### 12.2 Cryptographically Authorized WebSocket Rooms
+To prevent eavesdropping on sensitive medical data (blood group, allergies, contact numbers) and clinician GPS coordinates, MedRelay rejects unauthenticated WebSocket connections and strictly isolates telemetry into authorized rooms:
 ```javascript
-// Server isolates subscriptions by alert ID
-socket.on('joinAlertRoom', (alertId) => {
-    socket.join(`alert_${alertId}`);
+// 1. Socket handshake JWT authentication middleware
+io.use((socket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (token) {
+        try {
+            socket.user = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (e) { socket.user = null; }
+    }
+    next();
 });
 
-// Location updates and status transitions are emitted exclusively to the alert room
-io.to(`alert_${alertId}`).emit('alertUpdate', { status: 'TRANSPORTING' });
+// 2. Cryptographically authorized room subscription logic
+socket.on('joinAlertRoom', async ({ alertId, token }) => {
+    const targetId = parseInt(alertId);
+    let isAuthorized = false;
+
+    // Administrators and Dispatchers have regional operational oversight
+    if (socket.user?.role === 'ADMIN' || socket.user?.role === 'DISPATCHER') {
+        isAuthorized = true;
+    }
+
+    // Patients and guest bystanders authenticate via signed per-alert tracking token
+    if (!isAuthorized && token) {
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            if (decoded.alertId === targetId) isAuthorized = true;
+        } catch (e) {}
+    }
+
+    if (isAuthorized) {
+        socket.join(`alert_${targetId}`);
+    } else {
+        socket.emit('joinError', { message: 'Unauthorized: Invalid tracking token.' });
+    }
+});
 ```
-Clients cannot observe or intercept telemetry from emergencies outside their authorized room.
+This guarantees that random external clients guessing sequential alert IDs cannot join or observe telemetry without cryptographic authorization.
 
 ### 12.3 Production Credential Security
 - Passwords are encrypted using `bcryptjs` with 10 salt rounds.
-- Default administrator credentials in `seed.js` are parameterized via `process.env.ADMIN_INITIAL_PASSWORD`, falling back to a secure high-entropy string (`MedRelayAdmin2026!`) rather than insecure static passwords.
+- In `seed.js`, initial administrator password creation strictly requires the `ADMIN_INITIAL_PASSWORD` environment variable in production environments (`process.env.NODE_ENV === 'production'`), throwing a fatal error if unset.
+- In non-production testing, high-entropy dynamic credentials (`crypto.randomBytes(16).toString('hex')`) are generated on the fly, eliminating published static passwords.
+- Demo test accounts are omitted in production seeding.
 
 ---
 
