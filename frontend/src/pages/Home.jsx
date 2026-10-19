@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { API_BASE } from '../config/api';
 
 const sosPatientIcon = L.divIcon({
   className: 'custom-patient-marker',
@@ -28,7 +29,7 @@ export default function Home() {
     
     navigator.geolocation.getCurrentPosition(async (pos) => {
       try {
-        const res = await fetch('https://emergency-backend-3ppk.onrender.com/api/alerts/trigger', {
+        const res = await fetch(`${API_BASE}/api/alerts/trigger`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -47,6 +48,7 @@ export default function Home() {
              patientLat: pos.coords.latitude,
              patientLng: pos.coords.longitude,
              doctor: data.dispatchedDoctor,
+             vehicle: data.allocatedVehicle,
              message: '🩺 DOCTOR DISPATCHED! A qualified physician has been dispatched to your location.'
            });
            if (data.alertId) {
@@ -94,6 +96,9 @@ export default function Home() {
                   <div><strong>Specialty:</strong> {sosStatus.doctor.specialization}</div>
                   <div><strong>Contact:</strong> {sosStatus.doctor.phone}</div>
                   <div><strong>Distance:</strong> {sosStatus.doctor.distance}</div>
+                  {sosStatus.vehicle && (
+                    <div style={{ color: '#38bdf8' }}><strong>Ambulance:</strong> 🚑 {sosStatus.vehicle.licensePlate} ({sosStatus.vehicle.type})</div>
+                  )}
                 </div>
               </div>
             )}

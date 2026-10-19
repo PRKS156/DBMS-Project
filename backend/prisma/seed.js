@@ -1,0 +1,181 @@
+const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcryptjs');
+
+const prisma = new PrismaClient();
+
+async function main() {
+    console.log('🌱 Starting MedRelay Database Seeding...');
+
+    // 1. Seed Network Hospitals
+    console.log('Seeding hospitals...');
+    const hospitalsData = [
+        { name: 'City General Hospital', address: 'Sector 4, Katpadi Road, Vellore', latitude: 12.9692, longitude: 79.1559, contactNumber: '+91-416-2244101' },
+        { name: 'VIT Health Centre', address: 'Main Campus Health Facility, VIT Vellore', latitude: 12.9719, longitude: 79.1595, contactNumber: '+91-416-2202100' },
+        { name: 'Apollo Speciality Care', address: 'Bypass Road, Vellore', latitude: 12.9352, longitude: 79.1330, contactNumber: '+91-416-2228800' },
+        { name: 'CMC Vellore', address: 'Ida Scudder Road, Vellore', latitude: 12.9250, longitude: 79.1350, contactNumber: '+91-416-2281000' }
+    ];
+
+    for (const h of hospitalsData) {
+        const existing = await prisma.hospital.findFirst({ where: { name: h.name } });
+        if (!existing) {
+            await prisma.hospital.create({ data: h });
+        }
+    }
+
+    // 2. Seed Emergency Vehicles (Ambulances)
+    console.log('Seeding emergency ambulances...');
+    const vehiclesData = [
+        { licensePlate: 'TN-23-EM-0108', type: 'Advanced Life Support (ALS)', isAvailable: true },
+        { licensePlate: 'TN-23-EM-0102', type: 'Basic Life Support (BLS)', isAvailable: true },
+        { licensePlate: 'TN-23-EM-0115', type: 'Advanced Life Support (ALS)', isAvailable: true },
+        { licensePlate: 'TN-23-EM-0120', type: 'Patient Transport Ambulance', isAvailable: true }
+    ];
+
+    for (const v of vehiclesData) {
+        const existing = await prisma.vehicle.findUnique({ where: { licensePlate: v.licensePlate } });
+        if (!existing) {
+            await prisma.vehicle.create({ data: v });
+        }
+    }
+
+    // 3. Seed Default Administrator
+    console.log('Seeding default administrator...');
+    const adminPassword = await bcrypt.hash('admin', 10);
+    const adminUser = await prisma.user.upsert({
+        where: { email: 'admin@vit.edu' },
+        update: { password: adminPassword, role: 'ADMIN' },
+        create: {
+            email: 'admin@vit.edu',
+            password: adminPassword,
+            role: 'ADMIN'
+        }
+    });
+
+    // 4. Seed Clinicians with Specializations & Coordinates
+    console.log('Seeding clinicians...');
+    const doctorsData = [
+        {
+            email: 'dr.ramesh@medrelay.com',
+            name: 'Dr. Ramesh Kumar',
+            specialization: 'Cardiology',
+            phone: '9876543210',
+            lat: 12.9710,
+            lng: 79.1610
+        },
+        {
+            email: 'dr.priya@medrelay.com',
+            name: 'Dr. Priya Sharma',
+            specialization: 'Trauma Surgery',
+            phone: '9876543211',
+            lat: 12.9698,
+            lng: 79.1575
+        },
+        {
+            email: 'dr.anita@medrelay.com',
+            name: 'Dr. Anita Desai',
+            specialization: 'Pediatrics',
+            phone: '9876543212',
+            lat: 12.9735,
+            lng: 79.1625
+        },
+        {
+            email: 'dr.vikram@medrelay.com',
+            name: 'Dr. Vikram Patel',
+            specialization: 'Orthopedics',
+            phone: '9876543213',
+            lat: 12.9680,
+            lng: 79.1540
+        },
+        {
+            email: 'dr.suresh@medrelay.com',
+            name: 'Dr. Suresh Menon',
+            specialization: 'General Medicine',
+            phone: '9876543214',
+            lat: 12.9705,
+            lng: 79.1590
+        }
+    ];
+
+    const defaultDoctorPassword = await bcrypt.hash('doctor123', 10);
+
+    for (const d of doctorsData) {
+        let user = await prisma.user.findUnique({ where: { email: d.email } });
+        if (!user) {
+            user = await prisma.user.create({
+                data: {
+                    email: d.email,
+                    password: defaultDoctorPassword,
+                    role: 'DOCTOR',
+                    doctorProfile: {
+                        create: {
+                            fullName: d.name,
+                            specialization: d.specialization,
+                            phoneNumber: d.phone,
+                            isAvailable: true,
+                            currentLat: d.lat,
+                            currentLng: d.lng
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // 5. Seed Test Patients
+    console.log('Seeding test patients...');
+    const patientPassword = await bcrypt.hash('patient123', 10);
+    const patientsData = [
+        {
+            email: 'john.doe@medrelay.com',
+            name: 'John Doe',
+            phone: '9840112233',
+            age: 42,
+            gender: 'Male',
+            bloodGroup: 'A+',
+            medicalHistory: 'Hypertension'
+        },
+        {
+            email: 'jane.smith@medrelay.com',
+            name: 'Jane Smith',
+            phone: '9840223344',
+            age: 29,
+            gender: 'Female',
+            bloodGroup: 'O+',
+            medicalHistory: 'Asthma, penicillin allergy'
+        }
+    ];
+
+    for (const p of patientsData) {
+        let user = await prisma.user.findUnique({ where: { email: p.email } });
+        if (!user) {
+            await prisma.user.create({
+                data: {
+                    email: p.email,
+                    password: patientPassword,
+                    role: 'PATIENT',
+                    patientProfile: {
+                        create: {
+                            fullName: p.name,
+                            phoneNumber: p.phone,
+                            age: p.age,
+                            gender: p.gender,
+                            bloodGroup: p.bloodGroup,
+                            medicalHistory: p.medicalHistory
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    console.log('✅ MedRelay Database Seed completed successfully!');
+}
+
+main()
+    .catch((e) => {
+        console.error('❌ Seeding error:', e);
+        process.exit(1);
+    })
+    .finally(async () => {
+        await prisma.$disconnect();
+    });

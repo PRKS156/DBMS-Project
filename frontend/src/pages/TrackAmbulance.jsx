@@ -4,8 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import { io } from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-
-const API_BASE = 'https://emergency-backend-3ppk.onrender.com';
+import { API_BASE, SOCKET_URL } from '../config/api';
 
 /* ─── Custom map icons ─── */
 function createPatientIcon() {
@@ -120,7 +119,7 @@ export default function TrackAmbulance() {
   useEffect(() => {
     if (!alertId) return;
 
-    socketRef.current = io(API_BASE);
+    socketRef.current = io(SOCKET_URL);
     socketRef.current.emit('joinAlertRoom', alertId);
 
     socketRef.current.on('alertUpdate', (data) => {
@@ -353,6 +352,11 @@ export default function TrackAmbulance() {
               {alertDetails.hospitalName && (
                 <span style={{ display: 'block', fontSize: '12px', color: '#5eead4', marginTop: '3px', fontWeight: '500' }}>
                   🏥 {alertDetails.hospitalName}
+                </span>
+              )}
+              {alertDetails.vehiclePlate && (
+                <span style={{ display: 'block', fontSize: '12px', color: '#38bdf8', marginTop: '3px', fontWeight: '500' }}>
+                  🚑 Ambulance: {alertDetails.vehiclePlate} ({alertDetails.vehicleType || 'Emergency Unit'})
                 </span>
               )}
             </div>

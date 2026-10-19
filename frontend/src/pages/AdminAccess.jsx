@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-
-const API_BASE = 'https://emergency-backend-3ppk.onrender.com';
+import { API_BASE } from '../config/api';
 
 export default function AdminAccess() {
   const [email, setEmail] = useState('');

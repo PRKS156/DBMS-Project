@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { API_BASE } from '../config/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -10,7 +11,7 @@ export default function Login() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('https://emergency-backend-3ppk.onrender.com/api/auth/login', { email, password });
+      const res = await axios.post(`${API_BASE}/api/auth/login`, { email, password });
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('role', res.data.role);
       navigate('/dashboard');

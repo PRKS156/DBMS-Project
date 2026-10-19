@@ -1,20 +1,6 @@
 const prisma = require('../config/db.js');
 
-// Haversine distance formula in meters
-function getDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371e3; // metres
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-}
+const { getDistance, formatDistance } = require('../utils/geoUtils');
 
 exports.getHospitals = async (req, res) => {
     try {
@@ -144,17 +130,30 @@ exports.triggerAlert = async (req, res) => {
             }
         });
 
+        // Allocate an available emergency ambulance if outdoors / field emergency
+        let allocatedVehicle = null;
+        if (locationType !== 'Building') {
+            allocatedVehicle = await prisma.vehicle.findFirst({
+                where: { isAvailable: true }
+            });
+            if (allocatedVehicle) {
+                await prisma.vehicle.update({
+                    where: { id: allocatedVehicle.id },
+                    data: { isAvailable: false }
+                });
+            }
+        }
+
         await prisma.dispatchRecord.create({
             data: {
                 alertId: newAlert.id,
                 doctorId: closestDoctor.id,
-                hospitalId: targetHospital ? targetHospital.id : null
+                hospitalId: targetHospital ? targetHospital.id : null,
+                vehicleId: allocatedVehicle ? allocatedVehicle.id : null
             }
         });
 
-        const distanceFormatted = closestDoctor.distance_meters > 1000 
-            ? `${(closestDoctor.distance_meters / 1000).toFixed(2)} km`
-            : `${Math.round(closestDoctor.distance_meters)} meters`;
+        const distanceFormatted = formatDistance(closestDoctor.distance_meters);
 
         const dispatchMessage = isFallback && requiredSpecialization && requiredSpecialization !== 'Unsure / General'
             ? `No ${requiredSpecialization} specialist was available nearby. The nearest available physician has been dispatched instead.`
@@ -171,7 +170,12 @@ exports.triggerAlert = async (req, res) => {
                 phone: closestDoctor.phoneNumber,
                 specialization: closestDoctor.specialization,
                 distance: distanceFormatted
-            }
+            },
+            allocatedVehicle: allocatedVehicle ? {
+                id: allocatedVehicle.id,
+                licensePlate: allocatedVehicle.licensePlate,
+                type: allocatedVehicle.type
+            } : null
         });
 
     } catch (error) {
@@ -188,7 +192,8 @@ exports.getAlertStatus = async (req, res) => {
             include: {
                 alert: { include: { patient: true } },
                 doctor: true,
-                hospital: true
+                hospital: true,
+                vehicle: true
             }
         });
 
@@ -199,7 +204,7 @@ exports.getAlertStatus = async (req, res) => {
         let distanceFormatted = "Unknown";
         if (dispatch.doctor && dispatch.doctor.currentLat && dispatch.alert.latitude) {
              const dist = getDistance(dispatch.alert.latitude, dispatch.alert.longitude, dispatch.doctor.currentLat, dispatch.doctor.currentLng);
-             distanceFormatted = dist > 1000 ? `${(dist / 1000).toFixed(2)} km` : `${Math.round(dist)} meters`;
+             distanceFormatted = formatDistance(dist);
         }
 
         return res.status(200).json({
@@ -213,6 +218,8 @@ exports.getAlertStatus = async (req, res) => {
                 hospitalName: dispatch.hospital ? dispatch.hospital.name : null,
                 hospitalAddress: dispatch.hospital ? dispatch.hospital.address : null,
                 hospitalContact: dispatch.hospital ? dispatch.hospital.contactNumber : null,
+                vehiclePlate: dispatch.vehicle ? dispatch.vehicle.licensePlate : null,
+                vehicleType: dispatch.vehicle ? dispatch.vehicle.type : null,
                 distanceFormatted,
                 description: dispatch.alert.description,
                 latitude: dispatch.alert.latitude,
@@ -240,7 +247,8 @@ exports.getDoctorAlerts = async (req, res) => {
             },
             include: { 
                 alert: { include: { patient: true } },
-                hospital: true
+                hospital: true,
+                vehicle: true
             },
             orderBy: { dispatchedAt: 'desc' }
         });
@@ -249,6 +257,8 @@ exports.getDoctorAlerts = async (req, res) => {
             alertid: d.alert.id,
             description: d.alert.description,
             hospitalName: d.hospital?.name || null,
+            vehiclePlate: d.vehicle?.licensePlate || null,
+            vehicleType: d.vehicle?.type || null,
             status: d.alert.status,
             latitude: d.alert.latitude,
             longitude: d.alert.longitude,
@@ -290,16 +300,28 @@ exports.acknowledgeAlert = async (req, res) => {
 
 exports.completeAlert = async (req, res) => {
     const { id } = req.params;
+    const alertId = parseInt(id);
     try {
         await prisma.emergencyAlert.update({
-            where: { id: parseInt(id) },
+            where: { id: alertId },
             data: { status: 'COMPLETED' }
         });
 
         await prisma.dispatchRecord.updateMany({
-            where: { alertId: parseInt(id) },
+            where: { alertId: alertId },
             data: { completedAt: new Date() }
         });
+
+        // Release allocated emergency vehicle if one was assigned
+        const dispatch = await prisma.dispatchRecord.findUnique({
+            where: { alertId: alertId }
+        });
+        if (dispatch && dispatch.vehicleId) {
+            await prisma.vehicle.update({
+                where: { id: dispatch.vehicleId },
+                data: { isAvailable: true }
+            });
+        }
 
         if (req.app.locals.io) {
             req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'COMPLETED' });
@@ -323,7 +345,7 @@ exports.getPatientActiveAlert = async (req, res) => {
                 status: { in: ['PENDING', 'DISPATCHED'] }
             },
             orderBy: { createdAt: 'desc' },
-            include: { dispatchRecord: { include: { doctor: true, hospital: true } } }
+            include: { dispatchRecord: { include: { doctor: true, hospital: true, vehicle: true } } }
         });
 
         if (!activeAlert) {
@@ -341,6 +363,8 @@ exports.getPatientActiveAlert = async (req, res) => {
                 specialization: dispatch?.doctor ? dispatch.doctor.specialization : 'N/A',
                 hospitalName: dispatch?.hospital ? dispatch.hospital.name : null,
                 hospitalAddress: dispatch?.hospital ? dispatch.hospital.address : null,
+                vehiclePlate: dispatch?.vehicle ? dispatch.vehicle.licensePlate : null,
+                vehicleType: dispatch?.vehicle ? dispatch.vehicle.type : null,
                 description: activeAlert.description,
                 latitude: activeAlert.latitude,
                 longitude: activeAlert.longitude,

@@ -29,6 +29,17 @@ app.get('/', (req, res) => {
 // Dynamic port configuration rule allowing Render to pass down random cloud ports automatically
 const PORT = process.env.PORT || 3000;
 
+// Catch-all 404 handler
+app.use('/api', (req, res) => {
+    res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error("❌ Unhandled server error:", err);
+    res.status(500).json({ success: false, message: "Internal server error.", error: err.message });
+});
+
 // Setup HTTP server and Socket.io for real-time updates
 const http = require('http');
 const { Server } = require('socket.io');

@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import 'leaflet/dist/leaflet.css';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import L from 'leaflet';
+import { API_BASE, SOCKET_URL } from '../config/api';
 
 function FitBounds({ p1, p2 }) {
   const map = useMap();
@@ -86,7 +87,7 @@ export default function Dashboard() {
 
     if (role === 'PATIENT') {
       // Fetch dynamic hospital network list
-      fetch('https://emergency-backend-3ppk.onrender.com/api/alerts/hospitals')
+      fetch(`${API_BASE}/api/alerts/hospitals`)
         .then(r => r.json())
         .then(data => {
           if (data.success && data.hospitals && data.hospitals.length > 0) {
@@ -97,7 +98,7 @@ export default function Dashboard() {
         })
         .catch(err => console.warn('Could not load dynamic hospital list, using defaults:', err));
 
-      socketRef.current = io('https://emergency-backend-3ppk.onrender.com');
+      socketRef.current = io(SOCKET_URL);
       socketRef.current.on('alertUpdate', (data) => {
         if (data.status === 'DISPATCHED') {
           setActiveAlertDetails(prev => prev ? { ...prev, status: 'DISPATCHED' } : prev);
@@ -109,7 +110,7 @@ export default function Dashboard() {
       // Restore active alert on mount if patient had an emergency in progress
       const restoreActive = async () => {
         try {
-          const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/patient/${localStorage.getItem('userId')}/active`);
+          const res = await fetch(`${API_BASE}/api/alerts/patient/${localStorage.getItem('userId')}/active`);
           const data = await res.json();
           if (res.ok && data.success && data.alert) {
             setActiveAlertId(data.alert.alertid);
@@ -140,7 +141,7 @@ export default function Dashboard() {
     if (role === 'PATIENT' && activeAlertId) {
       const fetchStatus = async () => {
         try {
-          const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${activeAlertId}/status`);
+          const res = await fetch(`${API_BASE}/api/alerts/${activeAlertId}/status`);
           const data = await res.json();
           if (res.ok && data.success && data.alert) {
             setActiveAlertDetails(data.alert);
@@ -170,7 +171,7 @@ export default function Dashboard() {
       const updateLocation = async (lat, lng) => {
         setDocCoords({ latitude: lat, longitude: lng });
         try {
-          await fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/location`, {
+          await fetch(`${API_BASE}/api/doctors/${localStorage.getItem('userId')}/location`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ latitude: lat, longitude: lng })
@@ -206,7 +207,7 @@ export default function Dashboard() {
 
   const fetchDoctorAlerts = async () => {
     try {
-      const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/doctor/${localStorage.getItem('userId')}`);
+      const res = await fetch(`${API_BASE}/api/alerts/doctor/${localStorage.getItem('userId')}`);
       const data = await res.json();
       if (res.ok && data.success) {
         if (data.alerts && data.alerts.length > 0) {
@@ -226,7 +227,7 @@ export default function Dashboard() {
   const acknowledgeAlert = async (alertId) => {
     try {
       setDoctorAlerts(prev => prev.map(a => a.alertid === alertId ? { ...a, status: 'DISPATCHED' } : a));
-      await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${alertId}/acknowledge`, { method: 'PATCH' });
+      await fetch(`${API_BASE}/api/alerts/${alertId}/acknowledge`, { method: 'PATCH' });
     } catch (err) {
       console.error(err);
     }
@@ -235,7 +236,7 @@ export default function Dashboard() {
   const completeAlert = async (alertId) => {
     try {
       setDoctorAlerts(prev => prev.filter(a => a.alertid !== alertId));
-      await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${alertId}/complete`, { method: 'PATCH' });
+      await fetch(`${API_BASE}/api/alerts/${alertId}/complete`, { method: 'PATCH' });
       fetchDoctorAlerts();
     } catch (err) {
       console.error(err);
@@ -245,7 +246,9 @@ export default function Dashboard() {
 
   const fetchAdminStats = async () => {
     try {
-      const res = await fetch('https://emergency-backend-3ppk.onrender.com/api/admin/data');
+      const res = await fetch(`${API_BASE}/api/admin/data`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await res.json();
       if (res.ok && data.success) {
         setAdminStats(data.stats);
@@ -259,7 +262,9 @@ export default function Dashboard() {
 
   const fetchAdminAnalytics = async () => {
     try {
-      const res = await fetch('https://emergency-backend-3ppk.onrender.com/api/admin/analytics');
+      const res = await fetch(`${API_BASE}/api/admin/analytics`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await res.json();
       if (res.ok && data.success) setAdminAnalytics(data);
     } catch (err) { console.error(err); }
@@ -271,7 +276,10 @@ export default function Dashboard() {
       return;
     }
     try {
-      const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/admin/${type}/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/admin/${type}/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await res.json();
       if (res.ok && data.success) {
         if (type === 'patients') {
@@ -398,7 +406,7 @@ export default function Dashboard() {
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
             try {
-              const res = await fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/location`, {
+              const res = await fetch(`${API_BASE}/api/doctors/${localStorage.getItem('userId')}/location`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -423,7 +431,7 @@ export default function Dashboard() {
           alert('⚠️ Cannot go off duty: You have an emergency response actively in progress. Please complete the emergency response before concluding your duty session.');
           return;
         }
-        fetch(`https://emergency-backend-3ppk.onrender.com/api/doctors/${localStorage.getItem('userId')}/status`, {
+        fetch(`${API_BASE}/api/doctors/${localStorage.getItem('userId')}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: false })
@@ -485,6 +493,9 @@ export default function Dashboard() {
                       </div>
                       {alert.hospitalName && (
                         <p style={{ margin: '0 0 6px 0' }}><strong>🏥 Hospital Facility:</strong> {alert.hospitalName}</p>
+                      )}
+                      {alert.vehiclePlate && (
+                        <p style={{ margin: '0 0 6px 0' }}><strong>🚑 Allocated Ambulance:</strong> {alert.vehiclePlate} ({alert.vehicleType || 'EMS Unit'})</p>
                       )}
                       <p style={{ margin: '0 0 6px 0' }}><strong>📍 Location details:</strong> {alert.description}</p>
                       <p style={{ margin: '0 0 6px 0' }}><strong>📋 Medical History:</strong> {alert.medicalHistory || 'None provided'}</p>
@@ -596,7 +607,7 @@ export default function Dashboard() {
 
       navigator.geolocation.getCurrentPosition(async (pos) => {
         try {
-          const res = await fetch('https://emergency-backend-3ppk.onrender.com/api/alerts/trigger', {
+          const res = await fetch(`${API_BASE}/api/alerts/trigger`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -682,7 +693,7 @@ export default function Dashboard() {
                 style={{ width: '100%' }}
                 onClick={async () => {
                   try {
-                    await fetch(`https://emergency-backend-3ppk.onrender.com/api/alerts/${activeAlertId}/feedback`, {
+                    await fetch(`${API_BASE}/api/alerts/${activeAlertId}/feedback`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
@@ -741,6 +752,9 @@ export default function Dashboard() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       {activeAlertDetails.hospitalName && (
                         <div><strong>Dispatching Hospital:</strong><br/>🏥 {activeAlertDetails.hospitalName}</div>
+                      )}
+                      {activeAlertDetails.vehiclePlate && (
+                        <div><strong>Allocated Ambulance:</strong><br/>🚑 {activeAlertDetails.vehiclePlate} ({activeAlertDetails.vehicleType || 'EMS'})</div>
                       )}
                       <div><strong>Doctor:</strong><br/>Dr. {activeAlertDetails.doctorname}</div>
                       <div><strong>Specialty:</strong><br/>{activeAlertDetails.specialization}</div>
