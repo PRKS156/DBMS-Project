@@ -28,13 +28,15 @@ exports.updateLocation = async (req, res) => {
             return res.status(404).json({ success: false, message: "Doctor profile not found." });
         }
 
+        const computedAvailable = docProfile.isOnDuty && !docProfile.isBusy;
+
         const updated = await prisma.doctorProfile.update({
             where: { id: docProfile.id },
             data: {
                 currentLat: lat,
                 currentLng: lng,
                 lastLocationAt: new Date(),
-                isAvailable: true,
+                isAvailable: computedAvailable,
                 user: { update: { updatedAt: new Date() } }
             }
         });
@@ -61,7 +63,7 @@ exports.updateLocation = async (req, res) => {
             req.app.locals.io.emit('doctorLocation', { doctorId: docProfile.userId, latitude: lat, longitude: lng });
         }
 
-        return res.status(200).json({ success: true, message: "Location and availability updated.", profile: updated });
+        return res.status(200).json({ success: true, message: "Location telemetry updated.", profile: updated });
     } catch (error) {
         console.error("❌ Location Update Failure:", error.message);
         return res.status(500).json({ success: false, message: "Location update failed.", debug: error.message });
@@ -69,12 +71,13 @@ exports.updateLocation = async (req, res) => {
 };
 
 /**
- * Update doctor's availability status (on-duty / off-duty).
+ * Update doctor's shift duty status (isOnDuty: true / false).
+ * Clinicians control isOnDuty. Dispatch transactions control isBusy.
  */
 exports.setStatus = async (req, res) => {
     const { id } = req.params;
     const targetId = parseInt(id);
-    const { status } = req.body; // Expecting boolean 'isAvailable'
+    const { status } = req.body; // Expecting boolean 'isOnDuty' or legacy 'status'
 
     if (isNaN(targetId)) {
         return res.status(400).json({ success: false, message: "Invalid doctor ID." });
@@ -93,12 +96,32 @@ exports.setStatus = async (req, res) => {
             return res.status(404).json({ success: false, message: "Doctor profile not found." });
         }
 
+        const computedAvailable = status && !docProfile.isBusy;
+
         const updated = await prisma.doctorProfile.update({
             where: { id: docProfile.id },
-            data: { isAvailable: status }
+            data: {
+                isOnDuty: status,
+                isAvailable: computedAvailable
+            }
         });
 
-        return res.status(200).json({ success: true, message: "Duty status updated.", isAvailable: updated.isAvailable });
+        if (req.app.locals.io) {
+            req.app.locals.io.emit('doctorStatusUpdate', {
+                doctorId: docProfile.userId,
+                isOnDuty: updated.isOnDuty,
+                isBusy: updated.isBusy,
+                isAvailable: updated.isAvailable
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Duty status updated: ${status ? 'On Duty' : 'Off Duty'}.`,
+            isOnDuty: updated.isOnDuty,
+            isBusy: updated.isBusy,
+            isAvailable: updated.isAvailable
+        });
     } catch (error) {
         console.error("❌ Status Update Failure:", error.message);
         return res.status(500).json({ success: false, message: "Status update failed.", debug: error.message });
@@ -135,7 +158,11 @@ exports.getDoctorProfile = async (req, res) => {
                 name: doc.fullName,
                 phone: doc.phoneNumber,
                 specialization: doc.specialization,
+                isOnDuty: doc.isOnDuty,
+                isBusy: doc.isBusy,
                 isAvailable: doc.isAvailable,
+                isActive: doc.isActive,
+                lastLocationAt: doc.lastLocationAt,
                 currentLat: doc.currentLat,
                 currentLng: doc.currentLng
             }
@@ -164,7 +191,11 @@ exports.getAllDoctors = async (req, res) => {
                 name: d.fullName,
                 phone: d.phoneNumber,
                 specialization: d.specialization,
+                isOnDuty: d.isOnDuty,
+                isBusy: d.isBusy,
                 isAvailable: d.isAvailable,
+                isActive: d.isActive,
+                lastLocationAt: d.lastLocationAt,
                 currentLat: d.currentLat,
                 currentLng: d.currentLng
             }))

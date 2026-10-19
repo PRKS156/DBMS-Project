@@ -157,9 +157,17 @@ npm run build
 
 ---
 
-## 🛡️ Health Data Privacy & Emergency Consent (DPDP Act 2023 / GDPR / HIPAA)
+## 🛡️ Health Data Privacy & Emergency Consent (DPDP Act 2023 / GDPR / HIPAA Design Reference)
 
-- **Statutory Emergency Exemptions:** MedRelay's emergency workflows are aligned with life-safety exemptions under **India's Digital Personal Data Protection (DPDP) Act 2023 Section 7(b)**, **GDPR Article 9(2)(c)**, and **HIPAA 45 CFR § 164.512(j)**, sharing patient triage records strictly with authorized response teams.
-- **Cryptographic WebSocket Isolation:** Real-time location and clinical context are restricted to authenticated users and signed per-alert tracking tokens (`alert_${alertId}`).
-- **Right to Erasure vs Clinical Audit Retention:** Reconciles GDPR erasure rights with statutory clinical record retention through Soft PII Redaction—overwriting personal identifiers while retaining anonymized dispatch records and timestamps.
-- **Encryption Architecture:** Full in-transit encryption via TLS 1.3 (HTTPS & WSS). At-rest storage encryption managed at the cloud disk volume level (AES-256). Application field-level encryption is not implemented in this prototype.
+- **Statutory Emergency Exemptions:** MedRelay's emergency workflows are aligned with life-safety exemptions under **India's Digital Personal Data Protection (DPDP) Act 2023 Section 7(f)** (*medical emergencies involving a threat to life or immediate threat to health*), **GDPR Article 9(2)(c)** (*vital interests*), and **HIPAA 45 CFR § 164.512(j)** (*architectural design reference for emergency access*), sharing patient triage records strictly with authorized response teams.
+- **Cryptographic WebSocket Isolation & Anti-Spoofing:** Real-time location and clinical context are restricted to authenticated participants and signed per-alert tracking tokens (`alert_${alertId}`). Doctor location broadcasts strictly verify that the emitting socket belongs to the assigned physician.
+- **Right to Erasure vs Clinical Audit Retention:** Reconciles privacy erasure rights with statutory clinical record retention through Soft PII Redaction—overwriting personal identifiers and soft-deactivating staff (`isActive: false`) while retaining immutable audit snapshots on dispatch records.
+- **Encryption Architecture:** Full in-transit encryption via **TLS (HTTPS & WSS)**. At-rest storage encryption managed at the cloud database volume level (AES-256).
+
+---
+
+## ⚠️ Known Practical & Operational Limitations
+
+1. **Mobile Browser GPS Throttling:** Mobile operating systems (iOS Safari and Android Chrome) throttle or suspend Geolocation updates when the device screen locks or the tab enters the background. Clinicians must keep the browser tab active and screen awake during their shift to maintain fresh telemetry (< 60s cutoff).
+2. **Render Free-Tier Idle Sleep:** On Render's free tier, backend instances spin down after inactivity. Background retry loops (`setInterval`) halt while sleeping; an external uptime monitor/pinger is required to keep the instance continuously active in production.
+3. **Road-Network ETA vs Spatial Routing:** Dispatch prioritizes candidates within a 15 km spatial radius and re-ranks top candidates via OSRM driving durations. In environments without live traffic feeds, road network speeds assume standard urban driving conditions.

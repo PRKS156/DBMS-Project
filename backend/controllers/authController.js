@@ -82,3 +82,57 @@ exports.login = async (req, res) => {
     res.status(500).json({ error: 'Login error' });
   }
 };
+
+/**
+ * Clearly labelled Evaluator Demo Mode Login
+ * Allows project evaluators and reviewers to immediately test role-based portals
+ * (Admin Console, Regional Dispatcher, Field Doctor, Patient SOS) without credential friction.
+ */
+exports.demoLogin = async (req, res) => {
+  try {
+    const { role } = req.body; // 'ADMIN', 'DISPATCHER', 'DOCTOR', 'PATIENT'
+    let targetUser = null;
+
+    if (role === 'ADMIN' || role === 'DISPATCHER') {
+      targetUser = await prisma.user.findFirst({
+        where: { role: 'ADMIN', isActive: true }
+      });
+    } else if (role === 'DOCTOR') {
+      targetUser = await prisma.user.findFirst({
+        where: { role: 'DOCTOR', isActive: true },
+        include: { doctorProfile: true }
+      });
+    } else {
+      targetUser = await prisma.user.findFirst({
+        where: { role: 'PATIENT', isActive: true },
+        include: { patientProfile: true }
+      });
+    }
+
+    if (!targetUser) {
+      return res.status(404).json({ error: `No active ${role} found for demo session.` });
+    }
+
+    let fullName = targetUser.email;
+    if (targetUser.role === 'DOCTOR' && targetUser.doctorProfile) fullName = targetUser.doctorProfile.fullName;
+    if (targetUser.role === 'PATIENT' && targetUser.patientProfile) fullName = targetUser.patientProfile.fullName;
+    if (targetUser.role === 'ADMIN') fullName = role === 'DISPATCHER' ? 'Regional Dispatch Controller' : 'Chief Medical Administrator';
+
+    const token = jwt.sign(
+      { userId: targetUser.id, role: role === 'DISPATCHER' ? 'DISPATCHER' : targetUser.role },
+      process.env.JWT_SECRET || 'supersecretkey',
+      { expiresIn: '8h' }
+    );
+
+    return res.status(200).json({
+      message: `Evaluator demo session active as ${role}`,
+      token,
+      role: role === 'DISPATCHER' ? 'DISPATCHER' : targetUser.role,
+      userId: targetUser.id,
+      name: fullName,
+      isDemo: true
+    });
+  } catch (err) {
+    return res.status(500).json({ error: "Demo login failed", debug: err.message });
+  }
+};

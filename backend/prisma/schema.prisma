@@ -28,6 +28,7 @@ model User {
   email          String          @unique
   password       String
   role           Role            @default(PATIENT)
+  isActive       Boolean         @default(true)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -46,7 +47,10 @@ model DoctorProfile {
   fullName       String
   specialization String
   phoneNumber    String
+  isOnDuty       Boolean   @default(true)
+  isBusy         Boolean   @default(false)
   isAvailable    Boolean   @default(true)
+  isActive       Boolean   @default(true)
   currentLat     Float?
   currentLng     Float?
   lastLocationAt DateTime?
@@ -55,6 +59,7 @@ model DoctorProfile {
 
   dispatches     DispatchRecord[]
 
+  @@index([isOnDuty, isBusy])
   @@index([isAvailable])
 }
 
@@ -115,35 +120,81 @@ model EmergencyAlert {
 
 // 7. DispatchRecord Entity (Relationship Table)
 model DispatchRecord {
-  id             Int       @id @default(autoincrement())
-  alertId        Int       @unique
-  alert          EmergencyAlert @relation(fields: [alertId], references: [id], onDelete: Restrict)
+  id                           Int            @id @default(autoincrement())
+  alertId                      Int            @unique
+  alert                        EmergencyAlert @relation(fields: [alertId], references: [id], onDelete: Restrict)
   
-  doctorId       Int?
-  doctor         DoctorProfile? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  doctorId                     Int?
+  doctor                       DoctorProfile? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
   
-  vehicleId      Int?
-  vehicle        Vehicle?       @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  vehicleId                    Int?
+  vehicle                      Vehicle?       @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
   
-  hospitalId     Int?
-  hospital       Hospital?      @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  hospitalId                   Int?
+  hospital                     Hospital?      @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
   
-  dispatchedAt   DateTime       @default(now())
-  completedAt    DateTime?
+  dispatchedAt                 DateTime       @default(now())
+  completedAt                  DateTime?
 
-  feedback       Feedback?
+  // Audit trail snapshots preserving responder identity even if accounts are modified
+  doctorNameSnapshot           String?
+  doctorSpecializationSnapshot String?
+  doctorPhoneSnapshot          String?
+  vehiclePlateSnapshot         String?
+  hospitalNameSnapshot         String?
+
+  feedback                     Feedback?
 }
 
 // 8. Feedback Entity
 model Feedback {
-  id               Int       @id @default(autoincrement())
-  dispatchRecordId Int       @unique
+  id               Int            @id @default(autoincrement())
+  dispatchRecordId Int            @unique
   dispatchRecord   DispatchRecord @relation(fields: [dispatchRecordId], references: [id], onDelete: Cascade)
   
   userId           Int
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  rating           Int       // 1-5
+  rating           Int            // 1-5
   comments         String?
-  createdAt        DateTime  @default(now())
+  createdAt        DateTime       @default(now())
 }
+
+// 9. Cold Storage Archive Models (Critique #16)
+model EmergencyAlertArchive {
+  id          Int       @id
+  patientId   Int?
+  latitude    Float?
+  longitude   Float?
+  status      String?
+  description String?
+  createdAt   DateTime?
+  archivedAt  DateTime  @default(now())
+}
+
+model DispatchRecordArchive {
+  id                           Int       @id
+  alertId                      Int?
+  doctorId                     Int?
+  vehicleId                    Int?
+  hospitalId                   Int?
+  dispatchedAt                 DateTime?
+  completedAt                  DateTime?
+  doctorNameSnapshot           String?
+  doctorSpecializationSnapshot String?
+  doctorPhoneSnapshot          String?
+  vehiclePlateSnapshot         String?
+  hospitalNameSnapshot         String?
+  archivedAt                   DateTime  @default(now())
+}
+
+model FeedbackArchive {
+  id               Int       @id
+  dispatchRecordId Int?
+  userId           Int?
+  rating           Int?
+  comments         String?
+  createdAt        DateTime?
+  archivedAt       DateTime  @default(now())
+}
+

@@ -81,8 +81,123 @@ io.on('connection', (socket) => {
     console.log(`🔌 Client connected: ${socket.id} (Authenticated User: ${socket.user?.userId || 'Anonymous'})`);
 
     if (socket.user && socket.user.role === 'DOCTOR') {
-        activeDoctorSockets.set(socket.id, socket.user.userId);
+        const doctorUserId = socket.user.userId;
+        activeDoctorSockets.set(socket.id, doctorUserId);
+
+        // Reconcile doctor availability and signal recovery on reconnect
+        (async () => {
+            try {
+                const docProfile = await prisma.doctorProfile.findUnique({
+                    where: { userId: doctorUserId },
+                    include: {
+                        dispatches: {
+                            where: {
+                                alert: { status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] } }
+                            }
+                        }
+                    }
+                });
+
+                if (docProfile) {
+                    const hasActiveMission = (docProfile.dispatches || []).length > 0;
+                    const shouldBeBusy = hasActiveMission || docProfile.isBusy;
+                    const computedAvailable = docProfile.isOnDuty && !shouldBeBusy;
+
+                    await prisma.doctorProfile.update({
+                        where: { id: docProfile.id },
+                        data: {
+                            isBusy: shouldBeBusy,
+                            isAvailable: computedAvailable
+                        }
+                    });
+
+                    if (hasActiveMission) {
+                        docProfile.dispatches.forEach(d => {
+                            io.to(`alert_${d.alertId}`).emit('doctorSignalRestored', {
+                                alertId: d.alertId,
+                                doctorId: doctorUserId,
+                                doctorName: docProfile.fullName,
+                                message: `Signal restored from responder Dr. ${docProfile.fullName}. Live telemetry resumed.`
+                            });
+                        });
+                        io.emit('dispatcherAlertUpdate', {
+                            alertId: docProfile.dispatches[0].alertId,
+                            doctorSignalRestored: true,
+                            doctorId: doctorUserId,
+                            doctorName: docProfile.fullName
+                        });
+                        console.log(`📶 Doctor #${doctorUserId} reconnected mid-mission: Retained busy & assigned.`);
+                    }
+                }
+            } catch (err) {
+                console.error("Error reconciling doctor reconnect state:", err.message);
+            }
+        })();
     }
+
+    // Critique #18: Anti-spoofing socket handler for real-time location broadcast
+    // Strictly verifies sender identity: Only the assigned doctor can broadcast coordinates into that alert's room
+    socket.on('locationBroadcast', async (data) => {
+        if (!socket.user || socket.user.role !== 'DOCTOR') {
+            return socket.emit('spoofError', {
+                success: false,
+                message: 'Unauthorized: Only authenticated clinicians may broadcast location telemetry.'
+            });
+        }
+
+        const doctorUserId = socket.user.userId;
+        const { alertId, latitude, longitude } = data || {};
+        const lat = parseFloat(latitude);
+        const lng = parseFloat(longitude);
+
+        if (isNaN(lat) || isNaN(lng)) {
+            return socket.emit('spoofError', {
+                success: false,
+                message: 'Invalid coordinates provided.'
+            });
+        }
+
+        // If broadcasting for a specific alert, strictly verify that THIS doctor is assigned to it!
+        if (alertId) {
+            const targetAlertId = parseInt(alertId);
+            try {
+                const dispatch = await prisma.dispatchRecord.findUnique({
+                    where: { alertId: targetAlertId },
+                    include: { doctor: true }
+                });
+
+                if (!dispatch || !dispatch.doctor || dispatch.doctor.userId !== doctorUserId) {
+                    console.warn(`🚨 Anti-Spoofing: Socket ${socket.id} (Doctor User #${doctorUserId}) attempted to push fake coords to alert #${targetAlertId}!`);
+                    return socket.emit('spoofError', {
+                        success: false,
+                        message: `Access Denied: You are not the assigned doctor for emergency alert #${targetAlertId}. Spoofed location broadcast rejected.`
+                    });
+                }
+
+                // Legitimate assigned doctor broadcasting to alert room
+                io.to(`alert_${targetAlertId}`).emit('doctorLocation', {
+                    doctorId: doctorUserId,
+                    latitude: lat,
+                    longitude: lng
+                });
+            } catch (err) {
+                return socket.emit('spoofError', { success: false, message: 'Verification error.', debug: err.message });
+            }
+        }
+
+        // Update doctor profile telemetry and timestamp
+        try {
+            await prisma.doctorProfile.updateMany({
+                where: { userId: doctorUserId },
+                data: {
+                    currentLat: lat,
+                    currentLng: lng,
+                    lastLocationAt: new Date()
+                }
+            });
+            socket.emit('locationBroadcastAck', { success: true, timestamp: new Date() });
+        } catch (e) {}
+    });
 
     // Critique #18: Authorized room subscription logic with signed per-alert tracking tokens and RBAC
     socket.on('joinAlertRoom', async (payload) => {
@@ -139,7 +254,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Critique #9: Mark doctor unavailable upon socket disconnection
+    // Two-State Doctor Disconnect Handler:
+    // A disconnect during an active mission alerts the dispatcher, and does NOT release the alert or flip duty off.
     socket.on('disconnect', async () => {
         console.log(`🔌 Client disconnected: ${socket.id}`);
         const doctorUserId = activeDoctorSockets.get(socket.id);
@@ -149,14 +265,55 @@ io.on('connection', (socket) => {
             const stillConnected = Array.from(activeDoctorSockets.values()).includes(doctorUserId);
             if (!stillConnected) {
                 try {
-                    await prisma.doctorProfile.updateMany({
+                    const docProfile = await prisma.doctorProfile.findUnique({
                         where: { userId: doctorUserId },
-                        data: { isAvailable: false }
+                        include: {
+                            dispatches: {
+                                where: {
+                                    alert: { status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] } }
+                                },
+                                include: { alert: true }
+                            }
+                        }
                     });
-                    io.emit('doctorStatusUpdate', { doctorId: doctorUserId, isAvailable: false });
-                    console.log(`📵 Doctor #${doctorUserId} disconnected: Availability flipped to offline/unavailable.`);
+
+                    if (docProfile) {
+                        const activeDispatches = docProfile.dispatches || [];
+                        if (activeDispatches.length > 0) {
+                            // Mid-mission signal loss!
+                            // Retain assignment, keep isBusy: true, and alert dispatcher & alert room
+                            console.warn(`⚠️ Mid-mission signal loss for Dr. ${docProfile.fullName} on Alert #${activeDispatches[0].alertId}`);
+                            activeDispatches.forEach(d => {
+                                io.to(`alert_${d.alertId}`).emit('doctorSignalLost', {
+                                    alertId: d.alertId,
+                                    doctorId: doctorUserId,
+                                    doctorName: docProfile.fullName,
+                                    message: `Telemetric signal lost from responder Dr. ${docProfile.fullName}. Retaining active dispatch while device attempts reconnection.`
+                                });
+                            });
+                            io.emit('dispatcherAlertUpdate', {
+                                alertId: activeDispatches[0].alertId,
+                                doctorSignalLost: true,
+                                doctorId: doctorUserId,
+                                doctorName: docProfile.fullName
+                            });
+                        } else {
+                            // Doctor had no active missions: mark unavailable (isAvailable = false) while preserving isOnDuty
+                            await prisma.doctorProfile.update({
+                                where: { id: docProfile.id },
+                                data: { isAvailable: false }
+                            });
+                            io.emit('doctorStatusUpdate', {
+                                doctorId: doctorUserId,
+                                isOnDuty: docProfile.isOnDuty,
+                                isBusy: false,
+                                isAvailable: false
+                            });
+                            console.log(`📵 Doctor #${doctorUserId} disconnected: Availability set to offline (isOnDuty preserved as ${docProfile.isOnDuty}).`);
+                        }
+                    }
                 } catch (e) {
-                    console.error('Error marking disconnected doctor offline:', e.message);
+                    console.error('Error handling disconnected doctor:', e.message);
                 }
             }
         }

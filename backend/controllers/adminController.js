@@ -66,31 +66,62 @@ exports.deleteDoctor = async (req, res) => {
         const docId = docProfile ? docProfile.id : null;
 
         if (docId) {
-            // Nullify doctor reference in dispatch records so history remains consistent
-            await prisma.dispatchRecord.updateMany({
-                where: { doctorId: docId },
-                data: { doctorId: null }
+            // Check if this clinician has historical dispatches
+            const dispatchCount = await prisma.dispatchRecord.count({
+                where: { doctorId: docId }
             });
+
+            if (dispatchCount > 0) {
+                // Snapshot responder identity on historical records if not already populated
+                await prisma.dispatchRecord.updateMany({
+                    where: { doctorId: docId, doctorNameSnapshot: null },
+                    data: {
+                        doctorNameSnapshot: docProfile.fullName,
+                        doctorSpecializationSnapshot: docProfile.specialization,
+                        doctorPhoneSnapshot: docProfile.phoneNumber
+                    }
+                });
+
+                // Soft-deactivate staff member (Critique #10):
+                // Retains foreign key relationships and audit integrity without nullifying responder identity
+                await prisma.doctorProfile.update({
+                    where: { id: docProfile.id },
+                    data: {
+                        isActive: false,
+                        isOnDuty: false,
+                        isBusy: false,
+                        isAvailable: false
+                    }
+                });
+
+                await prisma.user.update({
+                    where: { id: userId },
+                    data: { isActive: false }
+                });
+
+                return res.status(200).json({
+                    success: true,
+                    message: `Doctor #${docId} has ${dispatchCount} historical dispatch records. Account soft-deactivated (isActive: false) to preserve medical and forensic audit trails.`
+                });
+            }
         }
 
-        // Remove any feedbacks submitted by this user
+        // If no dispatch history exists, hard-delete account
         await prisma.feedback.deleteMany({
             where: { userId }
         });
 
-        // Delete doctor profile if exists
         if (docProfile) {
             await prisma.doctorProfile.deleteMany({
                 where: { id: docProfile.id }
             });
         }
 
-        // Delete user account
         await prisma.user.deleteMany({
             where: { id: userId }
         });
 
-        return res.status(200).json({ success: true, message: "Doctor deleted successfully." });
+        return res.status(200).json({ success: true, message: "Doctor account deleted." });
     } catch (error) {
         console.error("❌ Delete doctor failed:", error);
         return res.status(500).json({ success: false, message: "Delete failed.", debug: error.message });

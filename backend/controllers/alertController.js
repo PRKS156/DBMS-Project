@@ -66,9 +66,11 @@ exports.triggerAlert = async (req, res) => {
         // Critique #12: Strictly use explicit locationType === 'Building' to identify indoor alerts
         const isIndoorWard = (locationType === 'Building');
 
-        // Query active, available doctors who are not currently committed to an active emergency
+        // Two-state doctor availability (Critique #1 & #9): isOnDuty (shift) && !isBusy (mission status)
         let doctorWhere = {
-            isAvailable: true,
+            isOnDuty: true,
+            isBusy: false,
+            isActive: true,
             currentLat: { not: null },
             currentLng: { not: null },
             dispatches: {
@@ -80,26 +82,113 @@ exports.triggerAlert = async (req, res) => {
             }
         };
 
-        // Critique #12: Indoor ward alerts prioritize clinicians affiliated with that hospital
+        // Resolve target hospital first
+        let targetHospital = null;
+        if (hospitalId) {
+            targetHospital = await prisma.hospital.findUnique({ where: { id: parseInt(hospitalId) } });
+        }
+        if (!targetHospital && hospitalName) {
+            targetHospital = await prisma.hospital.findFirst({
+                where: { name: { contains: hospitalName, mode: 'insensitive' } }
+            });
+        }
+        if (!targetHospital) {
+            targetHospital = await prisma.hospital.findFirst();
+        }
+        const chosenHospitalName = targetHospital ? targetHospital.name : (hospitalName || landmark || 'City General Hospital');
+
+        let availableDoctors = [];
+
+        // Critique #12: Indoor hospital ward alerts strictly route to clinicians linked to that hospitalId
         if (isIndoorWard && hospitalId) {
             doctorWhere.hospitalId = parseInt(hospitalId);
-        }
+            let wardDoctors = await prisma.doctorProfile.findMany({
+                where: doctorWhere,
+                include: { user: true, hospital: true }
+            });
 
-        let availableDoctors = await prisma.doctorProfile.findMany({
-            where: doctorWhere,
-            include: { user: true, hospital: true }
-        });
+            // If no on-duty doctor has that hospitalId, do NOT match city-wide doctors!
+            // Route directly to Dispatcher queue and Hospital Admin with explicit priority escalation
+            if (wardDoctors.length === 0) {
+                let patProfileId = null;
+                if (patientId) {
+                    const profile = await prisma.patientProfile.findUnique({ where: { userId: parseInt(patientId) } });
+                    if (profile) patProfileId = profile.id;
+                }
+                if (!patProfileId) {
+                    const guest = await prisma.user.create({
+                        data: {
+                            email: `guest_${Date.now()}@medrelay.com`,
+                            password: 'guestpassword',
+                            role: 'PATIENT',
+                            patientProfile: {
+                                create: { fullName: 'Inpatient Bystander', phoneNumber: 'N/A', medicalHistory: 'Inpatient Ward Alert' }
+                            }
+                        },
+                        include: { patientProfile: true }
+                    });
+                    patProfileId = guest.patientProfile.id;
+                }
 
-        // Fallback to all available doctors if no clinicians specifically assigned to this hospital
-        if (availableDoctors.length === 0 && isIndoorWard && hospitalId) {
-            delete doctorWhere.hospitalId;
+                const wardEscalatedAlert = await prisma.$transaction(async (tx) => {
+                    const newAlert = await tx.emergencyAlert.create({
+                        data: {
+                            patientId: patProfileId,
+                            latitude: lat,
+                            longitude: lng,
+                            status: 'PENDING',
+                            description: `${requiredSpecialization || 'General'} | Hospital: ${chosenHospitalName}, Floor: ${floor || 'N/A'}, Room: ${roomNumber || 'N/A'}${bedNumber ? `, Bed: ${bedNumber}` : ''} [WARD ESCALATION: Zero on-duty staff at facility]`
+                        }
+                    });
+                    const dispatch = await tx.dispatchRecord.create({
+                        data: {
+                            alertId: newAlert.id,
+                            hospitalId: targetHospital ? targetHospital.id : parseInt(hospitalId),
+                            hospitalNameSnapshot: chosenHospitalName
+                        }
+                    });
+                    return { newAlert, dispatch };
+                });
+
+                const trackingToken = jwt.sign(
+                    { alertId: wardEscalatedAlert.newAlert.id, role: 'ALERT_TRACKER' },
+                    process.env.JWT_SECRET || 'supersecretkey',
+                    { expiresIn: '2h' }
+                );
+
+                if (req.app.locals.io) {
+                    req.app.locals.io.emit('wardEscalation', {
+                        alertId: wardEscalatedAlert.newAlert.id,
+                        hospitalName: chosenHospitalName,
+                        hospitalId: parseInt(hospitalId),
+                        description: wardEscalatedAlert.newAlert.description
+                    });
+                    req.app.locals.io.emit('dispatcherAlertUpdate', {
+                        alertId: wardEscalatedAlert.newAlert.id,
+                        status: 'PENDING',
+                        wardEscalation: true
+                    });
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    escalated: true,
+                    wardEscalated: true,
+                    alertId: wardEscalatedAlert.newAlert.id,
+                    trackingToken,
+                    message: `⚠️ Ward Escalation: No on-duty clinicians currently present inside ${chosenHospitalName}. Emergency routed with highest priority to the Dispatcher Operations Console & Hospital Admin for immediate manual staff assignment.`
+                });
+            }
+
+            availableDoctors = wardDoctors;
+        } else {
             availableDoctors = await prisma.doctorProfile.findMany({
                 where: doctorWhere,
                 include: { user: true, hospital: true }
             });
         }
 
-        // If no doctors are available, register escalated alert and advise immediate phone contact
+        // If no doctors are available across the sector
         if (availableDoctors.length === 0) {
             return res.status(200).json({
                 success: false,
@@ -193,22 +282,6 @@ exports.triggerAlert = async (req, res) => {
             patientProfileId = guestUser.patientProfile.id;
         }
 
-        // Resolve target hospital
-        let targetHospital = null;
-        if (hospitalId) {
-            targetHospital = await prisma.hospital.findUnique({ where: { id: parseInt(hospitalId) } });
-        }
-        if (!targetHospital && hospitalName) {
-            targetHospital = await prisma.hospital.findFirst({
-                where: { name: { contains: hospitalName, mode: 'insensitive' } }
-            });
-        }
-        if (!targetHospital) {
-            targetHospital = await prisma.hospital.findFirst();
-        }
-
-        const chosenHospitalName = targetHospital ? targetHospital.name : (hospitalName || landmark || 'City General Hospital');
-
         // Identify if inpatient hospital ward alert (Critique #12: Strictly use explicit locationType === 'Building')
         let alertDescription = '';
         if (isIndoorWard) {
@@ -233,49 +306,90 @@ exports.triggerAlert = async (req, res) => {
                 }
             });
 
-            // Atomically flip doctor status to busy
-            await tx.doctorProfile.update({
-                where: { id: closestDoctor.id },
-                data: { isAvailable: false }
+            // Atomically flip doctor status to busy if not already claimed
+            const claimResult = await tx.doctorProfile.updateMany({
+                where: {
+                    id: closestDoctor.id,
+                    isBusy: false,
+                    isOnDuty: true,
+                    isActive: true
+                },
+                data: { isBusy: true, isAvailable: false }
             });
+
+            let chosenDoctor = closestDoctor;
+
+            if (claimResult.count === 0) {
+                // If closestDoctor was grabbed by a concurrent SOS, find next available doctor
+                const alternative = await tx.doctorProfile.findFirst({
+                    where: {
+                        ...doctorWhere,
+                        id: { not: closestDoctor.id },
+                        isBusy: false,
+                        isOnDuty: true,
+                        isActive: true
+                    }
+                });
+
+                if (!alternative) {
+                    throw new Error("ALL_UNITS_COMMITTED");
+                }
+
+                await tx.doctorProfile.update({
+                    where: { id: alternative.id },
+                    data: { isBusy: true, isAvailable: false }
+                });
+                chosenDoctor = alternative;
+            }
 
             // Allocate an available emergency vehicle ONLY for outdoor field emergencies
             let vehicle = null;
             if (!isIndoorWard) {
-                vehicle = await tx.vehicle.findFirst({
+                const availableVehicles = await tx.vehicle.findMany({
                     where: { isAvailable: true }
                 });
-                if (vehicle) {
-                    await tx.vehicle.update({
-                        where: { id: vehicle.id },
+                for (const v of availableVehicles) {
+                    const claimed = await tx.vehicle.updateMany({
+                        where: { id: v.id, isAvailable: true },
                         data: { isAvailable: false }
                     });
+                    if (claimed.count > 0) {
+                        vehicle = v;
+                        break;
+                    }
                 }
             }
 
+            // Save dispatch record with immutable audit snapshots (Critique #10)
             const dispatch = await tx.dispatchRecord.create({
                 data: {
                     alertId: newAlert.id,
-                    doctorId: closestDoctor.id,
+                    doctorId: chosenDoctor.id,
                     hospitalId: targetHospital ? targetHospital.id : null,
-                    vehicleId: vehicle ? vehicle.id : null
+                    vehicleId: vehicle ? vehicle.id : null,
+                    doctorNameSnapshot: chosenDoctor.fullName,
+                    doctorSpecializationSnapshot: chosenDoctor.specialization,
+                    doctorPhoneSnapshot: chosenDoctor.phoneNumber,
+                    vehiclePlateSnapshot: vehicle ? vehicle.licensePlate : null,
+                    hospitalNameSnapshot: chosenHospitalName
                 }
             });
 
-            return { newAlert, vehicle, dispatch };
+            return { newAlert, vehicle, dispatch, chosenDoctor };
         });
 
-        const distanceFormatted = formatDistance(closestDoctor.distance_meters, isIndoorWard);
+        const activeDoctor = result.chosenDoctor || closestDoctor;
+        const distanceFormatted = formatDistance(activeDoctor.distance_meters || 0, isIndoorWard);
 
         const dispatchMessage = isFallback
             ? (fallbackReason || `Nearest available physician has been dispatched for rapid on-site stabilization.`)
-            : `A qualified ${closestDoctor.specialization} specialist has been dispatched to your location.`;
+            : `A qualified ${activeDoctor.specialization} specialist has been dispatched to your location.`;
 
-        // Critique #18: Issue signed per-alert tracking token for authenticated socket room and live map tracking
+        // Critique #18: Issue signed per-alert tracking token (short 2h expiry to mitigate URL leak risk)
         const trackingToken = jwt.sign(
             { alertId: result.newAlert.id, role: 'ALERT_TRACKER' },
             process.env.JWT_SECRET || 'supersecretkey',
-            { expiresIn: '6h' }
+            { expiresIn: '2h' }
         );
 
         if (req.app.locals.io) {
@@ -286,8 +400,8 @@ exports.triggerAlert = async (req, res) => {
                 patientId: patientProfileId,
                 latitude: lat,
                 longitude: lng,
-                doctorName: closestDoctor.fullName,
-                doctorSpecialization: closestDoctor.specialization
+                doctorName: activeDoctor.fullName,
+                doctorSpecialization: activeDoctor.specialization
             });
         }
 
@@ -299,10 +413,10 @@ exports.triggerAlert = async (req, res) => {
             alertId: result.newAlert.id,
             trackingToken,
             dispatchedDoctor: {
-                id: closestDoctor.id,
-                name: closestDoctor.fullName,
-                phone: closestDoctor.phoneNumber,
-                specialization: closestDoctor.specialization,
+                id: activeDoctor.id,
+                name: activeDoctor.fullName,
+                phone: activeDoctor.phoneNumber,
+                specialization: activeDoctor.specialization,
                 distance: distanceFormatted
             },
             allocatedVehicle: result.vehicle ? {
@@ -313,6 +427,13 @@ exports.triggerAlert = async (req, res) => {
         });
 
     } catch (error) {
+        if (error.message === "ALL_UNITS_COMMITTED") {
+            return res.status(200).json({
+                success: false,
+                escalated: true,
+                message: "⚠️ High Alert: All response units are currently committed to active emergencies. Your alert has been escalated to regional dispatch. Please call national emergency services (112 / 108) immediately."
+            });
+        }
         console.error("❌ Alert Trigger Failure:", error);
         return res.status(500).json({ success: false, message: "Database transaction failed.", debug: error.message });
     }
@@ -454,23 +575,46 @@ exports.transportAlert = async (req, res) => {
     const alertId = parseInt(id);
     const { hospitalId } = req.body;
     try {
-        await prisma.emergencyAlert.update({
-            where: { id: alertId },
-            data: { status: 'TRANSPORTING' }
+        let chosenHospitalName = null;
+        if (hospitalId) {
+            const h = await prisma.hospital.findUnique({ where: { id: parseInt(hospitalId) } });
+            if (h) chosenHospitalName = h.name;
+        }
+
+        await prisma.$transaction(async (tx) => {
+            await tx.emergencyAlert.update({
+                where: { id: alertId },
+                data: { status: 'TRANSPORTING' }
+            });
+
+            if (hospitalId) {
+                await tx.dispatchRecord.updateMany({
+                    where: { alertId: alertId },
+                    data: {
+                        hospitalId: parseInt(hospitalId),
+                        hospitalNameSnapshot: chosenHospitalName || undefined
+                    }
+                });
+            }
         });
 
-        if (hospitalId) {
-            await prisma.dispatchRecord.updateMany({
-                where: { alertId: alertId },
-                data: { hospitalId: parseInt(hospitalId) }
+        if (req.app.locals.io) {
+            req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', {
+                status: 'TRANSPORTING',
+                hospitalId: hospitalId ? parseInt(hospitalId) : undefined,
+                hospitalName: chosenHospitalName
+            });
+            req.app.locals.io.emit('dispatcherAlertUpdate', {
+                alertId: alertId,
+                status: 'TRANSPORTING',
+                hospitalName: chosenHospitalName
             });
         }
 
-        if (req.app.locals.io) {
-            req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'TRANSPORTING' });
-        }
-
-        return res.status(200).json({ success: true, message: "Patient secured; en route to hospital." });
+        return res.status(200).json({
+            success: true,
+            message: chosenHospitalName ? `Patient secured; en route to ${chosenHospitalName}.` : "Patient secured; en route to hospital."
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Failed to update transport status.", debug: error.message });
     }
@@ -482,37 +626,44 @@ exports.cancelAlert = async (req, res) => {
     const alertId = parseInt(id);
     const { reason } = req.body;
     try {
-        await prisma.emergencyAlert.update({
-            where: { id: alertId },
-            data: {
-                status: 'CANCELLED',
-                description: reason ? `[CANCELLED: ${reason}]` : undefined
+        await prisma.$transaction(async (tx) => {
+            await tx.emergencyAlert.update({
+                where: { id: alertId },
+                data: {
+                    status: 'CANCELLED',
+                    description: reason ? `[CANCELLED: ${reason}]` : undefined
+                }
+            });
+
+            const dispatch = await tx.dispatchRecord.findUnique({
+                where: { alertId: alertId }
+            });
+
+            if (dispatch) {
+                // Release doctor back to available pool
+                if (dispatch.doctorId) {
+                    const doc = await tx.doctorProfile.findUnique({ where: { id: dispatch.doctorId } });
+                    await tx.doctorProfile.update({
+                        where: { id: dispatch.doctorId },
+                        data: {
+                            isBusy: false,
+                            isAvailable: doc ? (doc.isOnDuty && doc.isActive) : true
+                        }
+                    });
+                }
+                // Release vehicle back to available
+                if (dispatch.vehicleId) {
+                    await tx.vehicle.update({
+                        where: { id: dispatch.vehicleId },
+                        data: { isAvailable: true }
+                    });
+                }
             }
         });
-
-        const dispatch = await prisma.dispatchRecord.findUnique({
-            where: { alertId: alertId }
-        });
-
-        if (dispatch) {
-            // Release doctor back to available
-            if (dispatch.doctorId) {
-                await prisma.doctorProfile.update({
-                    where: { id: dispatch.doctorId },
-                    data: { isAvailable: true }
-                });
-            }
-            // Release vehicle back to available
-            if (dispatch.vehicleId) {
-                await prisma.vehicle.update({
-                    where: { id: dispatch.vehicleId },
-                    data: { isAvailable: true }
-                });
-            }
-        }
 
         if (req.app.locals.io) {
             req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'CANCELLED', reason });
+            req.app.locals.io.emit('dispatcherAlertUpdate', { alertId, status: 'CANCELLED' });
         }
 
         return res.status(200).json({ success: true, message: "Emergency alert cancelled. Resources released." });
@@ -525,38 +676,45 @@ exports.completeAlert = async (req, res) => {
     const { id } = req.params;
     const alertId = parseInt(id);
     try {
-        await prisma.emergencyAlert.update({
-            where: { id: alertId },
-            data: { status: 'COMPLETED' }
-        });
+        await prisma.$transaction(async (tx) => {
+            await tx.emergencyAlert.update({
+                where: { id: alertId },
+                data: { status: 'COMPLETED' }
+            });
 
-        await prisma.dispatchRecord.updateMany({
-            where: { alertId: alertId },
-            data: { completedAt: new Date() }
-        });
+            await tx.dispatchRecord.updateMany({
+                where: { alertId: alertId },
+                data: { completedAt: new Date() }
+            });
 
-        const dispatch = await prisma.dispatchRecord.findUnique({
-            where: { alertId: alertId }
-        });
+            const dispatch = await tx.dispatchRecord.findUnique({
+                where: { alertId: alertId }
+            });
 
-        // Release doctor and vehicle back to available pool
-        if (dispatch) {
-            if (dispatch.doctorId) {
-                await prisma.doctorProfile.update({
-                    where: { id: dispatch.doctorId },
-                    data: { isAvailable: true }
-                });
+            // Release doctor and vehicle back to available pool
+            if (dispatch) {
+                if (dispatch.doctorId) {
+                    const doc = await tx.doctorProfile.findUnique({ where: { id: dispatch.doctorId } });
+                    await tx.doctorProfile.update({
+                        where: { id: dispatch.doctorId },
+                        data: {
+                            isBusy: false,
+                            isAvailable: doc ? (doc.isOnDuty && doc.isActive) : true
+                        }
+                    });
+                }
+                if (dispatch.vehicleId) {
+                    await tx.vehicle.update({
+                        where: { id: dispatch.vehicleId },
+                        data: { isAvailable: true }
+                    });
+                }
             }
-            if (dispatch.vehicleId) {
-                await prisma.vehicle.update({
-                    where: { id: dispatch.vehicleId },
-                    data: { isAvailable: true }
-                });
-            }
-        }
+        });
 
         if (req.app.locals.io) {
             req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'COMPLETED' });
+            req.app.locals.io.emit('dispatcherAlertUpdate', { alertId, status: 'COMPLETED' });
         }
 
         return res.status(200).json({ success: true, message: "Emergency marked as completed. Clinician and ambulance released." });
@@ -663,6 +821,8 @@ exports.getActiveEmergenciesView = async (req, res) => {
 
 /**
  * Manual reassignment of emergency responders for Dispatcher UI (Critique #7 & #11)
+ * Enforces atomic exchange: verifies new doctor availability, releases old doctor, claims new doctor,
+ * updates snapshots, in a single ACID transaction.
  */
 exports.reassignAlert = async (req, res) => {
     const { id } = req.params;
@@ -678,31 +838,89 @@ exports.reassignAlert = async (req, res) => {
             return res.status(404).json({ success: false, message: "Dispatch record not found." });
         }
 
+        const newDocId = doctorId ? parseInt(doctorId) : null;
+        const newVehId = vehicleId ? parseInt(vehicleId) : null;
+        const newHospId = hospitalId ? parseInt(hospitalId) : null;
+
         await prisma.$transaction(async (tx) => {
-            // If reassigned to a different doctor, release previous doctor
-            if (currentDispatch.doctorId && currentDispatch.doctorId !== parseInt(doctorId)) {
-                await tx.doctorProfile.update({
-                    where: { id: currentDispatch.doctorId },
-                    data: { isAvailable: true }
+            let newDocProfile = null;
+            let newVehicle = null;
+            let targetHospital = null;
+
+            // If a new doctor is specified and different from the current doctor
+            if (newDocId && newDocId !== currentDispatch.doctorId) {
+                newDocProfile = await tx.doctorProfile.findUnique({
+                    where: { id: newDocId }
                 });
-            }
-            // Lock new doctor availability
-            if (doctorId) {
+
+                if (!newDocProfile) {
+                    throw new Error(`Target doctor ID #${newDocId} not found.`);
+                }
+                if (!newDocProfile.isActive) {
+                    throw new Error(`Dr. ${newDocProfile.fullName} is inactive.`);
+                }
+                if (!newDocProfile.isOnDuty) {
+                    throw new Error(`Dr. ${newDocProfile.fullName} is currently off duty.`);
+                }
+                if (newDocProfile.isBusy) {
+                    throw new Error(`Dr. ${newDocProfile.fullName} is already committed to another active emergency.`);
+                }
+
+                // Atomic Claim: lock new doctor
                 await tx.doctorProfile.update({
-                    where: { id: parseInt(doctorId) },
-                    data: { isAvailable: false }
+                    where: { id: newDocId },
+                    data: { isBusy: true, isAvailable: false }
                 });
+
+                // Atomic Release: release old doctor
+                if (currentDispatch.doctorId) {
+                    const oldDoc = await tx.doctorProfile.findUnique({ where: { id: currentDispatch.doctorId } });
+                    await tx.doctorProfile.update({
+                        where: { id: currentDispatch.doctorId },
+                        data: {
+                            isBusy: false,
+                            isAvailable: oldDoc ? (oldDoc.isOnDuty && oldDoc.isActive) : true
+                        }
+                    });
+                }
+            } else if (newDocId && newDocId === currentDispatch.doctorId) {
+                newDocProfile = await tx.doctorProfile.findUnique({ where: { id: newDocId } });
             }
-            // Update dispatch record
+
+            // If a new vehicle is specified and different
+            if (newVehId && newVehId !== currentDispatch.vehicleId) {
+                newVehicle = await tx.vehicle.findUnique({ where: { id: newVehId } });
+                if (!newVehicle || !newVehicle.isAvailable) {
+                    throw new Error("Target vehicle is not available.");
+                }
+                await tx.vehicle.update({ where: { id: newVehId }, data: { isAvailable: false } });
+                if (currentDispatch.vehicleId) {
+                    await tx.vehicle.update({ where: { id: currentDispatch.vehicleId }, data: { isAvailable: true } });
+                }
+            } else if (newVehId && newVehId === currentDispatch.vehicleId) {
+                newVehicle = await tx.vehicle.findUnique({ where: { id: newVehId } });
+            }
+
+            if (newHospId) {
+                targetHospital = await tx.hospital.findUnique({ where: { id: newHospId } });
+            }
+
+            // Update dispatch record with new references and updated snapshots
             await tx.dispatchRecord.update({
                 where: { alertId },
                 data: {
-                    doctorId: doctorId ? parseInt(doctorId) : currentDispatch.doctorId,
-                    vehicleId: vehicleId ? parseInt(vehicleId) : currentDispatch.vehicleId,
-                    hospitalId: hospitalId ? parseInt(hospitalId) : currentDispatch.hospitalId
+                    doctorId: newDocId !== null ? newDocId : currentDispatch.doctorId,
+                    vehicleId: newVehId !== null ? newVehId : currentDispatch.vehicleId,
+                    hospitalId: newHospId !== null ? newHospId : currentDispatch.hospitalId,
+                    doctorNameSnapshot: newDocProfile ? newDocProfile.fullName : undefined,
+                    doctorSpecializationSnapshot: newDocProfile ? newDocProfile.specialization : undefined,
+                    doctorPhoneSnapshot: newDocProfile ? newDocProfile.phoneNumber : undefined,
+                    vehiclePlateSnapshot: newVehicle ? newVehicle.licensePlate : undefined,
+                    hospitalNameSnapshot: targetHospital ? targetHospital.name : undefined
                 }
             });
-            // Update alert status to DISPATCHED if pending
+
+            // Update alert status to DISPATCHED
             await tx.emergencyAlert.update({
                 where: { id: alertId },
                 data: { status: 'DISPATCHED' }
@@ -714,15 +932,15 @@ exports.reassignAlert = async (req, res) => {
             req.app.locals.io.emit('dispatcherAlertUpdate', { alertId, reallocated: true });
         }
 
-        return res.status(200).json({ success: true, message: "Alert reassigned successfully." });
+        return res.status(200).json({ success: true, message: "Alert reassigned successfully with atomic resource handoff." });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to reassign alert.", debug: error.message });
+        return res.status(400).json({ success: false, message: "Failed to reassign alert.", debug: error.message });
     }
 };
 
 /**
  * Background retry worker for unassigned PENDING emergencies (Critique #7)
- * Runs automatically every 15s to match newly freed doctors with waiting emergencies
+ * Uses strict atomic claim logic inside a transaction to prevent double-booking across workers and SOS calls.
  */
 exports.retryPendingAlerts = async (io) => {
     try {
@@ -737,54 +955,118 @@ exports.retryPendingAlerts = async (io) => {
         for (const alert of pendingAlerts) {
             if (alert.dispatchRecord && alert.dispatchRecord.doctorId) continue;
 
-            const availableDoctor = await prisma.doctorProfile.findFirst({
-                where: {
-                    isAvailable: true,
+            // Atomic claim transaction: Search, select, lock doctor & vehicle inside the same transaction
+            const matched = await prisma.$transaction(async (tx) => {
+                // Re-verify alert is still pending and unassigned
+                const currentAlert = await tx.emergencyAlert.findUnique({
+                    where: { id: alert.id },
+                    include: { dispatchRecord: true }
+                });
+                if (!currentAlert || currentAlert.status !== 'PENDING' || (currentAlert.dispatchRecord && currentAlert.dispatchRecord.doctorId)) {
+                    return null;
+                }
+
+                // Identify if indoor ward alert
+                const isIndoor = currentAlert.description && currentAlert.description.includes('Hospital:');
+                let targetHospId = currentAlert.dispatchRecord?.hospitalId;
+
+                let doctorWhere = {
+                    isOnDuty: true,
+                    isBusy: false,
+                    isActive: true,
                     currentLat: { not: null },
                     currentLng: { not: null },
                     dispatches: {
                         none: { alert: { status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] } } }
                     }
-                }
-            });
+                };
 
-            if (availableDoctor) {
-                await prisma.$transaction(async (tx) => {
-                    await tx.doctorProfile.update({
-                        where: { id: availableDoctor.id },
-                        data: { isAvailable: false }
-                    });
-                    const vehicle = await tx.vehicle.findFirst({ where: { isAvailable: true } });
+                if (isIndoor && targetHospId) {
+                    doctorWhere.hospitalId = targetHospId;
+                }
+
+                // Find candidate doctors
+                const candidates = await tx.doctorProfile.findMany({
+                    where: doctorWhere,
+                    include: { hospital: true }
+                });
+
+                if (candidates.length === 0) return null;
+
+                // Freshness preference (< 60s)
+                const STALE_TIMEOUT_MS = 60 * 1000;
+                const now = Date.now();
+                const fresh = candidates.filter(d => d.lastLocationAt && (now - new Date(d.lastLocationAt).getTime() < STALE_TIMEOUT_MS));
+                const pool = fresh.length > 0 ? fresh : candidates;
+
+                // Distance rank
+                const ranked = pool.map(d => ({
+                    ...d,
+                    dist: getDistance(currentAlert.latitude, currentAlert.longitude, d.currentLat, d.currentLng)
+                })).sort((a, b) => a.dist - b.dist);
+
+                const chosenDoctor = ranked[0];
+
+                // Atomic claim of doctor
+                await tx.doctorProfile.update({
+                    where: { id: chosenDoctor.id },
+                    data: { isBusy: true, isAvailable: false }
+                });
+
+                // Allocate vehicle if outdoor
+                let vehicle = null;
+                if (!isIndoor) {
+                    vehicle = await tx.vehicle.findFirst({ where: { isAvailable: true } });
                     if (vehicle) {
                         await tx.vehicle.update({ where: { id: vehicle.id }, data: { isAvailable: false } });
                     }
-                    if (alert.dispatchRecord) {
-                        await tx.dispatchRecord.update({
-                            where: { id: alert.dispatchRecord.id },
-                            data: { doctorId: availableDoctor.id, vehicleId: vehicle?.id || null }
-                        });
-                    } else {
-                        await tx.dispatchRecord.create({
-                            data: {
-                                alertId: alert.id,
-                                doctorId: availableDoctor.id,
-                                vehicleId: vehicle?.id || null
-                            }
-                        });
-                    }
-                });
-
-                if (io) {
-                    io.to(`alert_${alert.id}`).emit('alertUpdate', {
-                        status: 'DISPATCHED',
-                        assignedDoctor: availableDoctor.fullName
-                    });
-                    io.emit('dispatcherAlertUpdate', { alertId: alert.id, status: 'DISPATCHED' });
                 }
-                console.log(`🔄 Retry Loop: Matched pending alert #${alert.id} to newly available Dr. ${availableDoctor.fullName}`);
+
+                // Update or create dispatch record with audit snapshots
+                let dispatch = null;
+                if (currentAlert.dispatchRecord) {
+                    dispatch = await tx.dispatchRecord.update({
+                        where: { id: currentAlert.dispatchRecord.id },
+                        data: {
+                            doctorId: chosenDoctor.id,
+                            vehicleId: vehicle?.id || null,
+                            doctorNameSnapshot: chosenDoctor.fullName,
+                            doctorSpecializationSnapshot: chosenDoctor.specialization,
+                            doctorPhoneSnapshot: chosenDoctor.phoneNumber,
+                            vehiclePlateSnapshot: vehicle ? vehicle.licensePlate : null
+                        }
+                    });
+                } else {
+                    dispatch = await tx.dispatchRecord.create({
+                        data: {
+                            alertId: currentAlert.id,
+                            doctorId: chosenDoctor.id,
+                            vehicleId: vehicle?.id || null,
+                            doctorNameSnapshot: chosenDoctor.fullName,
+                            doctorSpecializationSnapshot: chosenDoctor.specialization,
+                            doctorPhoneSnapshot: chosenDoctor.phoneNumber,
+                            vehiclePlateSnapshot: vehicle ? vehicle.licensePlate : null
+                        }
+                    });
+                }
+
+                return { alert: currentAlert, doctor: chosenDoctor, vehicle, dispatch };
+            });
+
+            if (matched && io) {
+                io.to(`alert_${matched.alert.id}`).emit('alertUpdate', {
+                    status: 'PENDING',
+                    assignedDoctor: matched.doctor.fullName
+                });
+                io.emit('dispatcherAlertUpdate', {
+                    alertId: matched.alert.id,
+                    status: 'PENDING',
+                    assignedDoctor: matched.doctor.fullName
+                });
+                console.log(`🔄 Retry Loop: Atomically matched pending alert #${matched.alert.id} to Dr. ${matched.doctor.fullName}`);
             }
         }
     } catch (err) {
-        // Silently catch background worker errors to prevent crashing main thread
+        console.error("Retry loop error:", err.message);
     }
 };

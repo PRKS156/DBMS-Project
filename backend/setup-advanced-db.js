@@ -11,16 +11,39 @@ async function main() {
     console.log('Enum value notice:', err.message);
   }
 
-  // 1. Add dedicated lastLocationAt and hospitalId to DoctorProfile (Items #9, #10, #12)
-  console.log('Migrating DoctorProfile columns for dedicated GPS heartbeat and hospital linkage...');
+  // 1. Add dedicated status flags and columns to DoctorProfile and User
+  console.log('Migrating DoctorProfile columns for duty state, busy state, and snapshots...');
+  const alterColumns = [
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "isActive" BOOLEAN DEFAULT true;`,
+    `ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "isOnDuty" BOOLEAN DEFAULT true;`,
+    `ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "isBusy" BOOLEAN DEFAULT false;`,
+    `ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "isActive" BOOLEAN DEFAULT true;`,
+    `ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "lastLocationAt" TIMESTAMP(3);`,
+    `ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "hospitalId" INT;`,
+    `ALTER TABLE "DispatchRecord" ADD COLUMN IF NOT EXISTS "doctorNameSnapshot" TEXT;`,
+    `ALTER TABLE "DispatchRecord" ADD COLUMN IF NOT EXISTS "doctorSpecializationSnapshot" TEXT;`,
+    `ALTER TABLE "DispatchRecord" ADD COLUMN IF NOT EXISTS "doctorPhoneSnapshot" TEXT;`,
+    `ALTER TABLE "DispatchRecord" ADD COLUMN IF NOT EXISTS "vehiclePlateSnapshot" TEXT;`,
+    `ALTER TABLE "DispatchRecord" ADD COLUMN IF NOT EXISTS "hospitalNameSnapshot" TEXT;`
+  ];
+
+  for (const sql of alterColumns) {
+    try {
+      await prisma.$executeRawUnsafe(sql);
+    } catch (e) {
+      console.warn('Column notice:', e.message);
+    }
+  }
+
+  // 1c. Set existing doctors isOnDuty = true, isBusy = false
   await prisma.$executeRawUnsafe(`
-    ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "lastLocationAt" TIMESTAMP(3);
-  `);
-  await prisma.$executeRawUnsafe(`
-    ALTER TABLE "DoctorProfile" ADD COLUMN IF NOT EXISTS "hospitalId" INT;
+    UPDATE "DoctorProfile" 
+    SET "isOnDuty" = COALESCE("isAvailable", true), 
+        "isBusy" = CASE WHEN "isAvailable" = false THEN true ELSE false END
+    WHERE "isOnDuty" IS NULL OR "isBusy" IS NULL;
   `);
 
-  // Foreign key constraint on DispatchRecord: protect historical audit rows with SET NULL (Item #10)
+  // Foreign key constraints on DispatchRecord: preserve audit trail
   try {
     await prisma.$executeRawUnsafe(`
       DO $$
@@ -56,11 +79,11 @@ async function main() {
       p."medicalHistory",
       d.id AS "dispatchId",
       doc.id AS "doctorId",
-      doc."fullName" AS "doctorName",
-      doc."specialization",
-      doc."phoneNumber" AS "doctorPhone",
-      h.name AS "hospitalName",
-      v."licensePlate" AS "vehiclePlate",
+      COALESCE(doc."fullName", d."doctorNameSnapshot") AS "doctorName",
+      COALESCE(doc."specialization", d."doctorSpecializationSnapshot") AS "specialization",
+      COALESCE(doc."phoneNumber", d."doctorPhoneSnapshot") AS "doctorPhone",
+      COALESCE(h.name, d."hospitalNameSnapshot") AS "hospitalName",
+      COALESCE(v."licensePlate", d."vehiclePlateSnapshot") AS "vehiclePlate",
       v."type" AS "vehicleType"
     FROM "EmergencyAlert" a
     LEFT JOIN "PatientProfile" p ON a."patientId" = p.id
@@ -71,10 +94,10 @@ async function main() {
     WHERE a.status IN ('PENDING', 'DISPATCHED', 'TRANSPORTING');
   `);
 
-  // 3. Fix Item 16: Atomic Move Archival Table and Stored Procedure (DELETE ... RETURNING moved)
-  console.log('Creating EmergencyAlertArchive table and atomic move archival procedure...');
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS "EmergencyAlertArchive" (
+  // 3. Fix Item 16: Complete Child-Table Atomic Move Archival Procedure (Critique #16)
+  console.log('Creating archive tables and robust cascading atomic move procedure...');
+  const archiveTables = [
+    `CREATE TABLE IF NOT EXISTS "EmergencyAlertArchive" (
       "id" INT PRIMARY KEY,
       "patientId" INT,
       "latitude" DOUBLE PRECISION,
@@ -83,25 +106,83 @@ async function main() {
       "description" TEXT,
       "createdAt" TIMESTAMP,
       "archivedAt" TIMESTAMP DEFAULT NOW()
-    );
-  `);
+    );`,
+    `CREATE TABLE IF NOT EXISTS "DispatchRecordArchive" (
+      "id" INT PRIMARY KEY,
+      "alertId" INT,
+      "doctorId" INT,
+      "vehicleId" INT,
+      "hospitalId" INT,
+      "dispatchedAt" TIMESTAMP,
+      "completedAt" TIMESTAMP,
+      "doctorNameSnapshot" TEXT,
+      "doctorSpecializationSnapshot" TEXT,
+      "doctorPhoneSnapshot" TEXT,
+      "vehiclePlateSnapshot" TEXT,
+      "hospitalNameSnapshot" TEXT,
+      "archivedAt" TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS "FeedbackArchive" (
+      "id" INT PRIMARY KEY,
+      "dispatchRecordId" INT,
+      "userId" INT,
+      "rating" INT,
+      "comments" TEXT,
+      "createdAt" TIMESTAMP,
+      "archivedAt" TIMESTAMP DEFAULT NOW()
+    );`
+  ];
+
+  for (const sql of archiveTables) {
+    await prisma.$executeRawUnsafe(sql);
+  }
 
   await prisma.$executeRawUnsafe(`
     CREATE OR REPLACE PROCEDURE archive_completed_alerts(retention_days INT DEFAULT 30)
     LANGUAGE plpgsql
     AS $$
+    DECLARE
+      v_cutoff TIMESTAMP := NOW() - (retention_days || ' days')::INTERVAL;
     BEGIN
-      -- Atomically move completed emergencies past retention window from operational table to cold storage archive table
-      WITH moved_alerts AS (
-        DELETE FROM "EmergencyAlert"
-        WHERE status = 'COMPLETED' 
-          AND "updatedAt" < NOW() - (retention_days || ' days')::INTERVAL
-        RETURNING id, "patientId", latitude, longitude, status::text, description, "createdAt"
-      )
-      INSERT INTO "EmergencyAlertArchive" ("id", "patientId", "latitude", "longitude", "status", "description", "createdAt", "archivedAt")
-      SELECT id, "patientId", latitude, longitude, status, description, "createdAt", NOW()
-      FROM moved_alerts
+      -- Step 1: Move Feedback child records belonging to eligible completed alerts
+      INSERT INTO "FeedbackArchive" ("id", "dispatchRecordId", "userId", "rating", "comments", "createdAt", "archivedAt")
+      SELECT f."id", f."dispatchRecordId", f."userId", f."rating", f."comments", f."createdAt", NOW()
+      FROM "Feedback" f
+      JOIN "DispatchRecord" d ON f."dispatchRecordId" = d."id"
+      JOIN "EmergencyAlert" a ON d."alertId" = a."id"
+      WHERE a.status = 'COMPLETED' AND a."updatedAt" < v_cutoff
       ON CONFLICT ("id") DO NOTHING;
+
+      DELETE FROM "Feedback" f
+      USING "DispatchRecord" d, "EmergencyAlert" a
+      WHERE f."dispatchRecordId" = d."id" 
+        AND d."alertId" = a."id"
+        AND a.status = 'COMPLETED' 
+        AND a."updatedAt" < v_cutoff;
+
+      -- Step 2: Move DispatchRecord child records belonging to eligible completed alerts
+      INSERT INTO "DispatchRecordArchive" ("id", "alertId", "doctorId", "vehicleId", "hospitalId", "dispatchedAt", "completedAt", "doctorNameSnapshot", "doctorSpecializationSnapshot", "doctorPhoneSnapshot", "vehiclePlateSnapshot", "hospitalNameSnapshot", "archivedAt")
+      SELECT d."id", d."alertId", d."doctorId", d."vehicleId", d."hospitalId", d."dispatchedAt", d."completedAt", d."doctorNameSnapshot", d."doctorSpecializationSnapshot", d."doctorPhoneSnapshot", d."vehiclePlateSnapshot", d."hospitalNameSnapshot", NOW()
+      FROM "DispatchRecord" d
+      JOIN "EmergencyAlert" a ON d."alertId" = a."id"
+      WHERE a.status = 'COMPLETED' AND a."updatedAt" < v_cutoff
+      ON CONFLICT ("id") DO NOTHING;
+
+      DELETE FROM "DispatchRecord" d
+      USING "EmergencyAlert" a
+      WHERE d."alertId" = a."id"
+        AND a.status = 'COMPLETED' 
+        AND a."updatedAt" < v_cutoff;
+
+      -- Step 3: Move parent EmergencyAlert rows
+      INSERT INTO "EmergencyAlertArchive" ("id", "patientId", "latitude", "longitude", "status", "description", "createdAt", "archivedAt")
+      SELECT a."id", a."patientId", a."latitude", a."longitude", a."status"::text, a."description", a."createdAt", NOW()
+      FROM "EmergencyAlert" a
+      WHERE a.status = 'COMPLETED' AND a."updatedAt" < v_cutoff
+      ON CONFLICT ("id") DO NOTHING;
+
+      DELETE FROM "EmergencyAlert" a
+      WHERE a.status = 'COMPLETED' AND a."updatedAt" < v_cutoff;
     END;
     $$;
   `);
@@ -131,6 +212,7 @@ async function main() {
     $$ LANGUAGE plpgsql;
   `);
 
+  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_update_timestamp ON "EmergencyAlert";`);
   await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS trg_log_alert_status ON "EmergencyAlert";`);
 
   await prisma.$executeRawUnsafe(`

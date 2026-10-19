@@ -92,6 +92,14 @@ export default function Dashboard() {
       return () => clearInterval(interval);
     } else if (role === 'DOCTOR') {
       fetchDoctorAlerts();
+      fetch(`${API_BASE}/api/doctors/${localStorage.getItem('userId')}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.doctor) {
+            setActive(Boolean(data.doctor.isOnDuty));
+          }
+        })
+        .catch(err => console.error(err));
       const interval = setInterval(fetchDoctorAlerts, 4000);
       return () => clearInterval(interval);
     }
@@ -686,7 +694,15 @@ export default function Dashboard() {
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
             try {
-              const res = await fetch(`${API_BASE}/api/doctors/${localStorage.getItem('userId')}/location`, {
+              // Explicitly set isOnDuty = true
+              await fetch(`${API_BASE}/api/doctors/${localStorage.getItem('userId')}/status`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: true })
+              });
+
+              // Transmit live GPS coordinates and fresh telemetry timestamp
+              await fetch(`${API_BASE}/api/doctors/${localStorage.getItem('userId')}/location`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -694,7 +710,7 @@ export default function Dashboard() {
                   longitude: pos.coords.longitude
                 })
               });
-              if (res.ok) setActive(true);
+              setActive(true);
             } catch (err) {
               console.error(err);
               setActive(true);
@@ -706,7 +722,7 @@ export default function Dashboard() {
           { enableHighAccuracy: true, timeout: 8000 }
         );
       } else {
-        const hasActiveEmergency = doctorAlerts.some(a => a.status === 'DISPATCHED');
+        const hasActiveEmergency = doctorAlerts.some(a => ['PENDING', 'DISPATCHED', 'TRANSPORTING'].includes(a.status));
         if (hasActiveEmergency) {
           alert('⚠️ Cannot go off duty: You have an emergency response actively in progress. Please complete the emergency response before concluding your duty session.');
           return;
@@ -727,13 +743,27 @@ export default function Dashboard() {
           <p className="sub">{active ? 'Your availability and location are being securely transmitted to the dispatch service.' : 'You are signed in but are not currently receiving emergency dispatches.'}</p>
         </div>
         
+        {/* Mobile Browser Telemetry Advisory */}
+        <div style={{
+          background: 'rgba(245, 158, 11, 0.1)',
+          border: '1px solid #f59e0b',
+          borderRadius: '8px',
+          padding: '10px 14px',
+          marginBottom: '1.25rem',
+          fontSize: '0.84rem',
+          color: '#fef3c7',
+          lineHeight: 1.45
+        }}>
+          <strong>📱 Mobile Browser Telemetry Notice:</strong> Mobile operating systems (iOS Safari & Android Chrome) aggressively throttle or pause Geolocation updates when the device screen locks or when switching to background tabs. To maintain continuous responder eligibility and prevent your 60-second telemetry cutoff from dropping you, <strong>please keep this browser tab active and screen awake during your on-duty shift</strong>.
+        </div>
+
         {!active ? (
           <>
             <div className="checklist">
               <h3>Before commencing duty</h3>
               <ul>
                 <li>Grant location access so that proximity-based dispatch can operate accurately.</li>
-                <li>Enable notifications to receive urgent alerts while this tab is closed.</li>
+                <li>Keep this tab open to continuously broadcast fresh GPS telemetry (&lt; 60s freshness).</li>
                 <li>Remain available until you formally conclude your on-duty session.</li>
               </ul>
             </div>
@@ -742,6 +772,16 @@ export default function Dashboard() {
         ) : (
           <>
             <div className="duty">Your location is being shared with the dispatch system.</div>
+            <div style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => handleDutyToggle(false)}
+                style={{ background: '#334155', color: '#f8fafc', padding: '6px 14px', fontSize: '0.85rem' }}
+              >
+                Conclude on-duty session (Go Off Duty)
+              </button>
+            </div>
             <div className="alerts-head"><h3>Assigned emergency requests</h3><span className="count-pill">{doctorAlerts.length} active</span></div>
             
             {doctorAlerts.length === 0 ? (
@@ -1234,11 +1274,11 @@ export default function Dashboard() {
               {loading ? 'Sending...' : 'Send for help now'} <span aria-hidden="true">→</span>
             </button>
 
-            {/* Privacy and Regulatory Alignment Notice (Critique #19: India DPDP Act 2023 / GDPR Art. 9 / HIPAA) */}
+            {/* Privacy and Regulatory Alignment Notice (Critique #19: India DPDP Act 2023 Section 7(f) / GDPR Art. 9 / HIPAA Design Reference) */}
             <div style={{ marginTop: '14px', padding: '10px 12px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#64748b', lineHeight: '1.4' }}>
-              <strong>🛡️ Emergency Data Privacy (Aligned with India DPDP Act 2023 Sec 7(b), GDPR Art. 9(2)(c) & HIPAA):</strong>
+              <strong>🛡️ Emergency Data Privacy (Aligned with India DPDP Act 2023 Sec 7(f), GDPR Art. 9(2)(c) & HIPAA Design Reference):</strong>
               <div style={{ marginTop: '4px' }}>
-                By triggering this emergency alert, you authorize the secure relay of your live GPS telemetry and vital triage profile solely to the assigned response unit for immediate life-safety rescue. Data is encrypted in transit via TLS.
+                By triggering this emergency alert, you authorize the secure relay of your live GPS telemetry and vital triage profile solely to the assigned response unit for immediate life-safety rescue under Section 7(f) of the DPDP Act 2023. Data is encrypted in transit via TLS (HTTPS/WSS).
               </div>
             </div>
             {error && <div className="result error" style={{display:'block', marginTop: '15px'}}>{error}</div>}

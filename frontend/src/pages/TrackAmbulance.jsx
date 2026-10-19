@@ -96,8 +96,22 @@ export default function TrackAmbulance() {
   const [error, setError] = useState('');
   const [msgIndex, setMsgIndex] = useState(0);
   const [elapsed, setElapsed] = useState(0);
+  const [signalLost, setSignalLost] = useState(false);
+  const [signalLostMsg, setSignalLostMsg] = useState('');
   const socketRef = useRef(null);
   const startTimeRef = useRef(Date.now());
+
+  // Critique #18: Scrub cryptographic token from URL address bar on mount to prevent leakage via browser history and referrer headers
+  useEffect(() => {
+    const rawToken = searchParams.get('token');
+    if (rawToken) {
+      localStorage.setItem('activeTrackingToken', rawToken);
+      const cleanParams = new URLSearchParams(searchParams);
+      cleanParams.delete('token');
+      const newQuery = cleanParams.toString() ? `?${cleanParams.toString()}` : '';
+      window.history.replaceState({}, document.title, window.location.pathname + newQuery + window.location.hash);
+    }
+  }, []);
 
   // Rotate reassurance messages
   useEffect(() => {
@@ -144,14 +158,25 @@ export default function TrackAmbulance() {
       }
     });
 
+    socketRef.current.on('doctorSignalLost', (data) => {
+      setSignalLost(true);
+      setSignalLostMsg(data?.message || 'Telemetric signal temporarily lost from responder. Device reconnecting... Active dispatch is retained.');
+    });
+
+    socketRef.current.on('doctorSignalRestored', () => {
+      setSignalLost(false);
+      setSignalLostMsg('');
+    });
+
     socketRef.current.on('doctorLocation', (loc) => {
       setDoctorLoc({ latitude: parseFloat(loc.latitude), longitude: parseFloat(loc.longitude) });
+      setSignalLost(false);
     });
 
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
     };
-  }, [alertId, searchParams, navigate]);
+  }, [alertId, navigate]);
 
   // Poll alert status
   useEffect(() => {
@@ -282,6 +307,33 @@ export default function TrackAmbulance() {
             {alertDetails?.hospitalName ? `${alertDetails.hospitalName} Ward Dispatch: ` : 'Indoor Ward Dispatch: '}
             Patient is admitted inside facility. Responding on foot.
           </span>
+        </div>
+      )}
+
+      {/* Responder Signal Lost Warning */}
+      {signalLost && (
+        <div style={{
+          position: 'absolute',
+          top: isAdmitted ? '65px' : '16px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          background: 'rgba(245, 158, 11, 0.96)',
+          border: '1px solid #d97706',
+          borderRadius: '30px',
+          padding: '8px 20px',
+          color: '#1c1917',
+          fontSize: '0.85rem',
+          fontWeight: '700',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          maxWidth: '90%',
+          textAlign: 'center'
+        }}>
+          <span>⚠️</span>
+          <span>{signalLostMsg || 'Telemetric signal temporarily lost from responder. Device reconnecting... Active dispatch is retained.'}</span>
         </div>
       )}
 
