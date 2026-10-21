@@ -48,10 +48,10 @@ async function main() {
     const initialPassword = adminPasswordEnv || crypto.randomBytes(16).toString('hex');
     const adminPassword = await bcrypt.hash(initialPassword, 10);
     const adminUser = await prisma.user.upsert({
-        where: { email: 'admin@vit.edu' },
+        where: { email: 'prakhar@vit.edu' },
         update: { password: adminPassword, role: 'ADMIN' },
         create: {
-            email: 'admin@vit.edu',
+            email: 'prakhar@vit.edu',
             password: adminPassword,
             role: 'ADMIN'
         }

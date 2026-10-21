@@ -99,8 +99,8 @@ exports.demoLogin = async (req, res) => {
 
     // 2. Limit strictly to seeded demo accounts
     const SEEDED_DEMO_EMAILS = {
-      ADMIN: 'admin@vit.edu',
-      DISPATCHER: 'admin@vit.edu',
+      ADMIN: 'prakhar@vit.edu',
+      DISPATCHER: 'prakhar@vit.edu',
       DOCTOR: 'dr.ramesh@medrelay.com',
       PATIENT: 'john.doe@medrelay.com'
     };

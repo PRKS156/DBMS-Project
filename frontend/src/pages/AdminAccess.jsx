@@ -42,7 +42,7 @@ export default function AdminAccess() {
       <form className="form" onSubmit={handleLogin}>
         <div className="field">
           <label>Admin Email Address</label>
-          <input type="email" placeholder="admin@vit.edu" value={email} onChange={e => setEmail(e.target.value)} required />
+          <input type="email" placeholder="prakhar@vit.edu" value={email} onChange={e => setEmail(e.target.value)} required />
         </div>
         <div className="field">
           <label>Administrative password</label>

@@ -174,5 +174,5 @@ npm run build
 4. **Mobile Browser GPS Throttling:** Mobile operating systems (iOS Safari and Android Chrome) aggressively throttle Geolocation updates when the device screen locks or the tab enters the background. Clinicians must keep the browser tab active and screen awake to satisfy the strict **60-second telemetry cutoff** (`STALE_TIMEOUT_MS = 60 * 1000`).
 5. **Public OSRM Demonstration Server:** Road-network driving distance and ETA estimations rely on the public Open Source Routing Machine demonstration server (`router.project-osrm.org`), which lacks contractual SLAs and live traffic congestion feeds. Production deployment requires a dedicated, containerized OSRM instance with traffic overlays.
 
-Additionally, Evaluator Demo Mode (`POST /api/auth/demo-login`) is strictly gated behind `DEMO_MODE=true` (returning 404 otherwise) and limited to pre-seeded demo accounts (`admin@vit.edu`, `dr.ramesh@medrelay.com`, `john.doe@medrelay.com`). Per-alert tracking tokens enforce a strict **2-hour expiry** (`expiresIn: '2h'`).
+Additionally, Evaluator Demo Mode (`POST /api/auth/demo-login`) is strictly gated behind `DEMO_MODE=true` (returning 404 otherwise) and limited to pre-seeded demo accounts (`prakhar@vit.edu`, `dr.ramesh@medrelay.com`, `john.doe@medrelay.com`). Per-alert tracking tokens enforce a strict **2-hour expiry** (`expiresIn: '2h'`).
 

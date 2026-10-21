@@ -230,7 +230,7 @@ While MedRelay enforces strict database normalization, ACID concurrency control,
 4. **Mobile Browser GPS Throttling:** Mobile operating systems (iOS Safari and Android Chrome) aggressively throttle or pause Geolocation updates (`watchPosition`) when the device screen locks or the tab enters the background. Because MedRelay enforces a strict **60-second telemetry cutoff** (`STALE_TIMEOUT_MS = 60 * 1000`) to guarantee responders are physically reachable, clinicians must keep the browser tab active and screen awake during their shift.
 5. **Public OSRM Demonstration Server:** Road-network driving distance and ETA estimations rely on the public Open Source Routing Machine (OSRM) demonstration server (`router.project-osrm.org`), which lacks contractual SLAs and live traffic congestion feeds. Production deployment requires a dedicated, containerized OSRM instance with traffic overlays.
 
-Additionally, bystander/patient tracking tokens enforce a strict **2-hour expiry** (`expiresIn: '2h'`) to limit URL leak exposure, and evaluator demo access is gated behind the `DEMO_MODE=true` environment flag, limited exclusively to pre-seeded demo accounts (`admin@vit.edu`, `dr.ramesh@medrelay.com`, `john.doe@medrelay.com`).
+Additionally, bystander/patient tracking tokens enforce a strict **2-hour expiry** (`expiresIn: '2h'`) to limit URL leak exposure, and evaluator demo access is gated behind the `DEMO_MODE=true` environment flag, limited exclusively to pre-seeded demo accounts (`prakhar@vit.edu`, `dr.ramesh@medrelay.com`, `john.doe@medrelay.com`).
 
 ## 17. Conclusion
 
