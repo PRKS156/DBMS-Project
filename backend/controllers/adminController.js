@@ -40,7 +40,7 @@ exports.getAllData = async (req, res) => {
                 name: p.fullName,
                 age: p.age,
                 gender: p.gender,
-                bloodGroup: p.bloodGroup,
+                bloodGroup: (p.fullName?.includes('Bystander') || p.fullName?.includes('Anonymous') || p.fullName?.includes('Inpatient') || p.user?.email?.includes('guest') || !p.bloodGroup || p.bloodGroup === 'null' || p.bloodGroup === 'N/A') ? 'Unknown' : p.bloodGroup,
                 phone: p.phoneNumber
             }))
         });

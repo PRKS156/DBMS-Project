@@ -75,7 +75,10 @@ async function main() {
       p.id AS "patientId",
       p."fullName" AS "patientName",
       p."phoneNumber" AS "patientPhone",
-      COALESCE(p."bloodGroup", 'Unknown') AS "bloodGroup",
+      CASE 
+        WHEN p."fullName" ILIKE '%Bystander%' OR p."fullName" ILIKE '%Anonymous%' OR p."fullName" ILIKE '%Inpatient%' OR p."bloodGroup" IS NULL OR p."bloodGroup" = 'null' OR p."bloodGroup" = '' THEN 'Unknown'
+        ELSE p."bloodGroup"
+      END AS "bloodGroup",
       p."medicalHistory",
       d.id AS "dispatchId",
       doc.id AS "doctorId",

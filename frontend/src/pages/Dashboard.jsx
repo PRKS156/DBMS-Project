@@ -545,7 +545,9 @@ export default function Dashboard() {
                       </td>
                       <td style={{ padding: '10px 8px' }}>
                         <strong>{item.patientName || 'Anonymous Bystander'}</strong>
-                        <div style={{ fontSize: '11px', color: '#64748b' }}>Blood: {item.bloodGroup || 'Unknown'} • {item.patientPhone || 'No phone'}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>
+                          Blood: {(item.patientName?.includes('Bystander') || item.patientName?.includes('Anonymous') || item.patientName?.includes('Inpatient') || !item.bloodGroup || item.bloodGroup === 'N/A' || item.bloodGroup === 'null' || item.bloodGroup === 'Unknown') ? 'Unknown' : item.bloodGroup} • {item.patientPhone || 'No phone'}
+                        </div>
                       </td>
                       <td style={{ padding: '10px 8px', maxWidth: '200px', fontSize: '0.82rem', color: '#334155' }}>
                         {item.description}
@@ -699,30 +701,36 @@ export default function Dashboard() {
                   <tbody>
                     {patientsList.length === 0 ? (
                       <tr><td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No patient accounts registered.</td></tr>
-                    ) : patientsList.map(p => (
-                      <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.name}</td>
-                        <td style={{ padding: '10px 8px', color: '#475569' }}>{p.email}</td>
-                        <td style={{ padding: '10px 8px' }}>{p.age ? `${p.age} yrs` : 'N/A'} • {p.gender || 'Not specified'}</td>
-                        <td style={{ padding: '10px 8px' }}>
-                          <span style={{
-                            padding: '3px 8px',
-                            borderRadius: '12px',
-                            background: (p.bloodGroup && p.bloodGroup !== 'Unknown') ? '#fee2e2' : '#f1f5f9',
-                            color: (p.bloodGroup && p.bloodGroup !== 'Unknown') ? '#991b1b' : '#64748b',
-                            fontSize: '11px',
-                            fontWeight: 'bold'
-                          }}>
-                            {p.bloodGroup || 'Unknown'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 8px' }}>
-                          <button className="btn-sm plain" onClick={() => deleteAdminRecord('patients', p.userId)}>
-                            GDPR Erasure
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    ) : patientsList.map(p => {
+                      const isUnknown = !p.bloodGroup || p.bloodGroup === 'Unknown' || p.bloodGroup === 'N/A' || p.bloodGroup === 'null' || p.name?.includes('Bystander') || p.name?.includes('Anonymous') || p.name?.includes('Inpatient') || p.email?.includes('guest');
+                      const displayBlood = isUnknown ? 'Unknown' : p.bloodGroup;
+                      return (
+                        <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.name}</td>
+                          <td style={{ padding: '10px 8px', color: '#475569' }}>{p.email}</td>
+                          <td style={{ padding: '10px 8px' }}>{p.age ? `${p.age} yrs` : 'N/A'} • {p.gender || 'Not specified'}</td>
+                          <td style={{ padding: '10px 8px' }}>
+                            <span style={{
+                              padding: '3px 8px',
+                              borderRadius: '12px',
+                              background: isUnknown ? 'rgba(100, 116, 139, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                              color: isUnknown ? '#94a3b8' : '#ef4444',
+                              border: isUnknown ? '1px solid rgba(148, 163, 184, 0.25)' : '1px solid rgba(239, 68, 68, 0.3)',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              display: 'inline-block'
+                            }}>
+                              {displayBlood}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 8px' }}>
+                            <button className="btn-sm plain" onClick={() => deleteAdminRecord('patients', p.userId)}>
+                              GDPR Erasure
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1001,7 +1009,9 @@ export default function Dashboard() {
                   return (
                     <div key={alert.alertid} style={{ border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'rgba(255,255,255,0.02)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-                        <strong style={{ fontSize: '1.05rem' }}>{alert.patientname} ({alert.age || '?'}y, {alert.gender || 'N/A'}) - Blood: {alert.bloodgroup || 'Unknown'}</strong>
+                        <strong style={{ fontSize: '1.05rem' }}>
+                          {alert.patientname} ({alert.age || '?'}y, {alert.gender || 'N/A'}) - Blood: {(alert.patientname?.includes('Bystander') || alert.patientname?.includes('Anonymous') || alert.patientname?.includes('Inpatient') || !alert.bloodgroup || alert.bloodgroup === 'null' || alert.bloodgroup === 'N/A') ? 'Unknown' : alert.bloodgroup}
+                        </strong>
                         <span className="count-pill" style={{
                           backgroundColor: alert.status === 'PENDING' ? '#fef08a' : '#bbf7d0',
                           color: alert.status === 'PENDING' ? '#854d0e' : '#14532d',

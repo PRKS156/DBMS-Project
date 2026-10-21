@@ -49,7 +49,7 @@ exports.registerPatient = async (req, res) => {
                     phoneNumber: phoneNumber ? phoneNumber.trim() : 'N/A',
                     age: age ? parseInt(age) : null,
                     gender: gender || null,
-                    bloodGroup: bloodGroup || null,
+                    bloodGroup: (bloodGroup && bloodGroup !== 'null') ? bloodGroup : 'Unknown',
                     medicalHistory: medicalHistory || null
                 }
             });

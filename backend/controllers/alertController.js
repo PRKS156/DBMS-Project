@@ -689,7 +689,7 @@ exports.getDoctorAlerts = async (req, res) => {
                 patientname: d.alert.patient?.fullName || 'Anonymous Patient',
                 age: d.alert.patient?.age || 'N/A',
                 gender: d.alert.patient?.gender || 'N/A',
-                bloodgroup: (d.alert.patient?.bloodGroup && d.alert.patient.bloodGroup !== 'null' && d.alert.patient.bloodGroup !== 'N/A') ? d.alert.patient.bloodGroup : 'Unknown',
+                bloodgroup: (d.alert.patient?.fullName?.includes('Bystander') || d.alert.patient?.fullName?.includes('Anonymous') || d.alert.patient?.fullName?.includes('Inpatient') || !d.alert.patient?.bloodGroup || d.alert.patient.bloodGroup === 'null' || d.alert.patient.bloodGroup === 'N/A') ? 'Unknown' : d.alert.patient.bloodGroup,
                 patientphone: d.alert.patient?.phoneNumber || 'N/A',
                 medicalHistory: d.alert.patient?.medicalHistory || 'None recorded'
             };

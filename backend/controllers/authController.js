@@ -36,7 +36,7 @@ exports.register = async (req, res) => {
             phoneNumber: phone || '',
             age: age ? parseInt(age) : null,
             gender: gender || null,
-            bloodGroup: bloodGroup || null,
+            bloodGroup: (bloodGroup && bloodGroup !== 'null') ? bloodGroup : 'Unknown',
           }
         });
       }
