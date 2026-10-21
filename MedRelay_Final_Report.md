@@ -470,7 +470,16 @@ BEGIN
 
     DELETE FROM "DispatchRecord" WHERE "alertId" IN (SELECT id FROM tmp_target_alerts);
 
-    -- 4. Move parent EmergencyAlert rows safely in the exact same ACID transaction
+    -- 4. Move child AlertStatusAudit rows (prevents foreign key violation when alerts have audit rows)
+    INSERT INTO "AlertStatusAuditArchive" ("auditId", "alertId", "oldStatus", "newStatus", "changedAt", "archivedAt")
+    SELECT aud."auditId", aud."alertId", aud."oldStatus", aud."newStatus", aud."changedAt", NOW()
+    FROM "AlertStatusAudit" aud
+    JOIN tmp_target_alerts t ON aud."alertId" = t.id
+    ON CONFLICT ("auditId") DO NOTHING;
+
+    DELETE FROM "AlertStatusAudit" WHERE "alertId" IN (SELECT id FROM tmp_target_alerts);
+
+    -- 5. Move parent EmergencyAlert rows safely in the exact same ACID transaction
     INSERT INTO "EmergencyAlertArchive" (id, "patientId", latitude, longitude, status, description, "createdAt", "archivedAt")
     SELECT a.id, a."patientId", a.latitude, a.longitude, a.status::text, a.description, a."createdAt", NOW()
     FROM "EmergencyAlert" a
@@ -481,7 +490,7 @@ BEGIN
 END;
 $$;
 ```
-*Engineering Distinction:* Rather than naive deletion of `EmergencyAlert` (which triggers relational foreign key errors or destroys un-archived clinical audit trails), MedRelay enforces a **child-first reverse-dependency order** (`Feedback` ➔ `DispatchRecord` ➔ `EmergencyAlert`) within a single PostgreSQL transaction. All clinical responder identities, license plates, and hospital milestones are immutably archived without data loss.
+*Engineering Distinction:* Rather than naive deletion of `EmergencyAlert` (which triggers relational foreign key errors or destroys un-archived clinical audit trails), MedRelay enforces a **child-first reverse-dependency order** (`Feedback` ➔ `DispatchRecord` ➔ `AlertStatusAudit` ➔ `EmergencyAlert`) within a single PostgreSQL transaction. All clinical responder identities, license plates, malpractice audit transitions, and hospital milestones are immutably archived without data loss.
 
 ---
 
@@ -513,10 +522,18 @@ To prevent eavesdropping on sensitive medical data (blood group, allergies, cont
 - **Eligibility Rule:** A doctor is eligible for dispatch if and only if `isOnDuty && !isBusy && isActive && lastLocationAt < 60s`.
 - **Mid-Mission Disconnect Protection:** If a clinician's device loses network connectivity mid-response, the socket disconnect handler does NOT release the alert or toggle duty off. The clinician remains assigned and busy (`isBusy: true`), and an alert (`doctorSignalLost`) is broadcast to the dispatcher console and tracking interface. When reconnected, telemetry resumes seamlessly.
 
-### 12.4 Known Practical & Operational Limitations
-1. **Mobile Browser GPS Throttling:** Mobile operating systems (iOS Safari and Android Chrome) aggressively throttle or pause Geolocation updates when the device screen locks or when switching to background tabs. To maintain continuous responder eligibility and prevent the 60-second telemetry cutoff from dropping active doctors, clinicians are advised via UI warnings to keep the browser tab active and screen awake during their shift.
-2. **Render Free-Tier Idle Sleep:** On Render's free tier, backend server instances sleep after 15 minutes of inactivity. Background retry workers (`setInterval`) halt while sleeping; an external uptime monitor or webhook pinger is required in production to maintain continuous background matching.
-3. **Production Credential Security & Evaluator Demo Mode:** The production database contains no default passwords or published demo accounts. For evaluation and grading purposes, a clearly labelled **Evaluator Demo Mode** (`POST /api/auth/demo-login`) is provided on all login portals, generating role-scoped JWT sessions for testing the Chief Administrator, Regional Dispatcher, Field Clinician, and Patient interfaces.
+### 12.4 Known Limitations (Practical, Operational & Infrastructure)
+
+While MedRelay provides strong relational ACID guarantees, real-world deployment faces distinct practical, operational, and architectural limitations:
+
+1. **In-Memory Sliding-Window Rate Limiter:** The IP sliding-window rate limiter (**15 requests per 10 minutes**, `RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000`) operates in Node.js process memory (`rateLimitMap`). Counter state resets upon server restarts. In a distributed multi-replica or auto-scaling container environment, rate limiting must be backed by an external distributed key-value store such as Redis to prevent counter fragmentation across instances.
+2. **Render Free-Tier Idle Sleep:** The backend REST API and WebSocket gateway run on Render's free hosting tier, which enters an idle sleep state after 15 minutes of inactivity. While sleeping, background polling loops (including the 15-second pending alert retry worker) are suspended until an incoming HTTP request wakes the container, incurring a 30–50 second cold-start initialization latency. Production deployment requires dedicated always-on compute or continuous synthetic pinging.
+3. **Absence of Application Column-Level Database Encryption:** Sensitive medical histories and clinical notes are protected in transit via TLS 1.3 (HTTPS/WSS) and encrypted at rest via cloud storage volume encryption (Supabase AWS EBS AES-256). However, application-level column encryption (such as PostgreSQL `pgcrypto` symmetric field encryption for clinical triage notes and patient medical history) is not implemented in this prototype; data privacy relies on relational role-based access control (RBAC).
+4. **Mobile Browser GPS Telemetry Throttling:** Mobile operating systems (iOS Safari and Android Chrome) aggressively throttle or suspend `navigator.geolocation.watchPosition` updates when the screen locks or when switching away from the active tab. Because MedRelay enforces a strict **60-second telemetry freshness cutoff** (`STALE_TIMEOUT_MS = 60 * 1000`) to ensure responders are physically reachable, clinicians must keep the browser tab active and screen awake during their shifts.
+5. **Public OSRM Demonstration Routing Server:** Road network driving distance and travel-time ETA calculations rely on the public Open Source Routing Machine demonstration server (`router.project-osrm.org`). This public server provides no contractual Service Level Agreement (SLA), does not incorporate real-time live traffic congestion feeds or temporary municipal road closures, and enforces public request rate limits. A production emergency system requires a dedicated self-hosted OSRM routing engine with live traffic overlay plugins.
+
+**Evaluator Demo Mode Security Hardening:**
+Evaluator Demo Mode (`POST /api/auth/demo-login`) is strictly gated behind the `DEMO_MODE=true` environment configuration and returns HTTP 404 in standard production deployments. Furthermore, logins are restricted strictly to pre-seeded demo accounts (`admin@vit.edu`, `dr.ramesh@medrelay.com`, `john.doe@medrelay.com`), preventing arbitrary users from obtaining administrative privileges on public deployments. Additionally, per-alert tracking tokens enforce a strict **2-hour expiry** (`expiresIn: '2h'`) to minimize URL leak exposure.
 
 ---
 
@@ -558,6 +575,6 @@ The system is deployed as a distributed cloud application:
 
 ## 17. Conclusion
 
-MedRelay demonstrates how modern relational database concepts—strict normalization, ACID transactions, database views, status change triggers, and automated stored procedure archival—can be synthesized with real-time WebSockets and GIS mapping to build an enterprise-grade emergency dispatch platform. 
+MedRelay demonstrates how modern relational database concepts—strict normalization, ACID transactions, database views, status change triggers, and automated stored procedure archival—can be synthesized with real-time WebSockets and GIS mapping to build an enterprise-grade emergency dispatch platform.
 
-By systematically addressing the 20 critical design, concurrency, telemetry, and regulatory failure modes common in pre-hospital emergency software, MedRelay delivers a fast, reliable, and auditable solution that protects patient lives while maintaining full clinical and legal integrity.
+Rather than claiming to eliminate every practical operational challenge, MedRelay establishes a robust database architecture with ACID transactional guarantees that systematically resolves core concurrency, spatial routing, and audit retention problems while transparently documenting real-world operational tradeoffs (detailed in Section 12.4). This delivers a fast, reliable, and auditable foundation that balances rapid clinical response with realistic technical and infrastructure boundaries.

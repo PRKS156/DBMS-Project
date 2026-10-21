@@ -45,7 +45,7 @@ MedRelay incorporates specialized database objects directly inside PostgreSQL to
    Fires `AFTER UPDATE OF status ON "EmergencyAlert"`, inserting `alertId`, `oldStatus`, `newStatus`, and server timestamp (`NOW()`) into an audit ledger for statutory healthcare compliance.
 
 3. **`EmergencyAlertArchive` & `archive_completed_alerts(retention_days)` (Stored Procedure):**
-   Executes an atomic move via Common Table Expression (`WITH moved_alerts AS (DELETE FROM ... RETURNING ...) INSERT INTO "EmergencyAlertArchive" ...`) migrating resolved alerts older than the retention threshold into cold storage without duplicate records or data loss.
+   Executes an atomic cascading move across child tables (`FeedbackArchive`, `DispatchRecordArchive`, `AlertStatusAuditArchive`) and parent `EmergencyAlertArchive` in strict reverse-dependency order, migrating completed alerts older than the retention threshold into cold storage without foreign key errors or data loss.
 
 ---
 
@@ -166,8 +166,13 @@ npm run build
 
 ---
 
-## ⚠️ Known Practical & Operational Limitations
+## ⚠️ Known Practical, Operational & Infrastructure Limitations
 
-1. **Mobile Browser GPS Throttling:** Mobile operating systems (iOS Safari and Android Chrome) throttle or suspend Geolocation updates when the device screen locks or the tab enters the background. Clinicians must keep the browser tab active and screen awake during their shift to maintain fresh telemetry (< 60s cutoff).
-2. **Render Free-Tier Idle Sleep:** On Render's free tier, backend instances spin down after inactivity. Background retry loops (`setInterval`) halt while sleeping; an external uptime monitor/pinger is required to keep the instance continuously active in production.
-3. **Road-Network ETA vs Spatial Routing:** Dispatch prioritizes candidates within a 15 km spatial radius and re-ranks top candidates via OSRM driving durations. In environments without live traffic feeds, road network speeds assume standard urban driving conditions.
+1. **In-Memory Rate Limiting:** The IP sliding-window rate limiter (**15 requests per 10 minutes**) operates in server process memory (`rateLimitMap`). Counter state resets upon container restarts; horizontal scaling across multiple replicas requires a distributed Redis cache.
+2. **Render Free-Tier Idle Sleep:** On Render's free tier, backend instances enter an idle sleep state after 15 minutes of inactivity. Background retry loops pause while sleeping, and waking requests experience a 30–50 second cold-start initialization delay.
+3. **No Column-Level Database Encryption:** While data is encrypted in transit (TLS 1.3) and at rest (Supabase AWS EBS AES-256), individual table columns (e.g., patient medical history and triage notes) lack application-level `pgcrypto` field-level encryption, relying on relational role-based access control (RBAC).
+4. **Mobile Browser GPS Throttling:** Mobile operating systems (iOS Safari and Android Chrome) aggressively throttle Geolocation updates when the device screen locks or the tab enters the background. Clinicians must keep the browser tab active and screen awake to satisfy the strict **60-second telemetry cutoff** (`STALE_TIMEOUT_MS = 60 * 1000`).
+5. **Public OSRM Demonstration Server:** Road-network driving distance and ETA estimations rely on the public Open Source Routing Machine demonstration server (`router.project-osrm.org`), which lacks contractual SLAs and live traffic congestion feeds. Production deployment requires a dedicated, containerized OSRM instance with traffic overlays.
+
+Additionally, Evaluator Demo Mode (`POST /api/auth/demo-login`) is strictly gated behind `DEMO_MODE=true` (returning 404 otherwise) and limited to pre-seeded demo accounts (`admin@vit.edu`, `dr.ramesh@medrelay.com`, `john.doe@medrelay.com`). Per-alert tracking tokens enforce a strict **2-hour expiry** (`expiresIn: '2h'`).
+

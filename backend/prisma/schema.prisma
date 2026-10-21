@@ -198,3 +198,13 @@ model FeedbackArchive {
   archivedAt       DateTime  @default(now())
 }
 
+model AlertStatusAuditArchive {
+  auditId    Int       @id
+  alertId    Int
+  oldStatus  String?
+  newStatus  String?
+  changedAt  DateTime?
+  archivedAt DateTime  @default(now())
+}
+
+

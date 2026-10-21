@@ -313,97 +313,13 @@ tbody tr:hover{background:#f7fbfa}
   background: #0a1214;
 }
 
-/* Map fills all available space */
-.track-map-container {
-  flex: 1;
-  position: relative;
-  z-index: 1;
-}
-.track-map-container .leaflet-container {
-  height: 100% !important;
-  width: 100% !important;
-  background: #0a1214;
-}
-.track-map-container .leaflet-tile {
-  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
-}
-
-/* Loading state */
-.map-loading {
+/* Telemetry and Tracking Layout */
+.track-telemetry-container {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #5ce0d5;
   gap: 16px;
+  width: 100%;
 }
-.map-loading p { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .03em; }
-.map-loading-spinner {
-  width: 36px; height: 36px;
-  border: 3px solid rgba(92, 224, 213, .2);
-  border-top-color: #5ce0d5;
-  border-radius: 50%;
-  animation: spin .8s linear infinite;
-}
-
-/* ─── Custom map markers ─── */
-.marker-pin {
-  width: 44px; height: 44px;
-  display: grid; place-items: center;
-  border-radius: 50%;
-  box-shadow: 0 4px 20px rgba(0,0,0,.35);
-  transition: transform .3s ease;
-}
-.marker-pin:hover { transform: scale(1.12); }
-
-.patient-pin {
-  background: linear-gradient(135deg, #c74a42, #e06058);
-  border: 2px solid rgba(255,255,255,.3);
-}
-.doctor-pin {
-  background: linear-gradient(135deg, #0c8a7a, #10b39e);
-  border: 2px solid rgba(255,255,255,.3);
-}
-
-.marker-pulse {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 44px; height: 44px;
-  border-radius: 50%;
-  animation: markerPulse 2s ease-out infinite;
-}
-.patient-pulse { background: rgba(199, 74, 66, .35); }
-.doctor-pulse  { background: rgba(12, 138, 122, .35); }
-
-@keyframes markerPulse {
-  0%   { width: 44px; height: 44px; opacity: .6; }
-  100% { width: 90px; height: 90px; opacity: 0; }
-}
-
-/* Fix Leaflet div icon styling */
-.custom-marker-patient,
-.custom-marker-doctor {
-  background: transparent !important;
-  border: none !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Custom popup */
-.custom-popup .leaflet-popup-content-wrapper {
-  background: rgba(20, 31, 34, .92);
-  backdrop-filter: blur(10px);
-  color: #eef2f1;
-  border-radius: 12px;
-  border: 1px solid rgba(92, 224, 213, .2);
-  box-shadow: 0 10px 30px rgba(0,0,0,.4);
-  padding: 4px 0;
-}
-.custom-popup .leaflet-popup-content { margin: 10px 14px; font-size: 12px; line-height: 1.6; }
-.custom-popup .leaflet-popup-tip { background: rgba(20, 31, 34, .92); }
 
 /* ─── Bottom overlay panel ─── */
 .track-overlay {

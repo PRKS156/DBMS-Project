@@ -1,82 +1,8 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { io } from 'socket.io-client';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import { API_BASE, SOCKET_URL } from '../config/api';
-
-/* ─── Custom map icons ─── */
-function createPatientIcon() {
-  return L.divIcon({
-    className: 'custom-marker-patient',
-    html: `<div class="marker-pin patient-pin">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/>
-      </svg>
-    </div>
-    <div class="marker-pulse patient-pulse"></div>`,
-    iconSize: [48, 48],
-    iconAnchor: [24, 24],
-    popupAnchor: [0, -28]
-  });
-}
-
-function createDoctorIcon() {
-  return L.divIcon({
-    className: 'custom-marker-doctor',
-    html: `<div class="marker-pin doctor-pin" style="display:flex;align-items:center;justify-content:center;background:#0ea5e9;border:3px solid #fff;border-radius:50%;width:42px;height:42px;box-shadow:0 0 16px rgba(14,165,233,0.7);font-size:20px;cursor:pointer;">
-      🩺
-    </div>
-    <div class="marker-pulse doctor-pulse"></div>`,
-    iconSize: [42, 42],
-    iconAnchor: [21, 21],
-    popupAnchor: [0, -24]
-  });
-}
-
-/* ─── Map auto-bounds ─── */
-function FitBounds({ patientPos, doctorPos }) {
-  const map = useMap();
-  useEffect(() => {
-    if (patientPos && doctorPos) {
-      const bounds = L.latLngBounds([patientPos, doctorPos]);
-      map.fitBounds(bounds, { padding: [80, 80], maxZoom: 16 });
-    } else if (patientPos) {
-      map.setView(patientPos, 15);
-    }
-  }, [patientPos, doctorPos, map]);
-  return null;
-}
-
-/* ─── ETA helpers ─── */
-function getDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3;
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function formatETA(meters, isAdmitted = false) {
-  if (isAdmitted || meters < 100) {
-    if (meters < 30) return 'Immediate (Same ward)';
-    return '~1 - 2 mins (On foot)';
-  }
-  const avgSpeed = 40; // km/h for urban transit
-  const minutes = (meters / 1000 / avgSpeed) * 60;
-  if (minutes < 1) return 'Less than 1 min';
-  if (minutes < 60) return `~${Math.ceil(minutes)} min`;
-  return `~${Math.floor(minutes / 60)}h ${Math.round(minutes % 60)}m`;
-}
-
-function formatDistance(meters, isAdmitted = false) {
-  if (isAdmitted && meters < 100) return 'Within Facility Ward';
-  if (meters > 1000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters)} m`;
-}
+import { fetchRoadRoute, formatRoadDistance, formatRoadETA, getHaversineDistance } from '../utils/routeService';
 
 /* ─── Reassurance messages ─── */
 const REASSURANCE_MESSAGES = [
@@ -93,6 +19,7 @@ export default function TrackAmbulance() {
   const alertId = searchParams.get('alertId');
   const [alertDetails, setAlertDetails] = useState(null);
   const [doctorLoc, setDoctorLoc] = useState(null);
+  const [routeData, setRouteData] = useState(null);
   const [error, setError] = useState('');
   const [msgIndex, setMsgIndex] = useState(0);
   const [elapsed, setElapsed] = useState(0);
@@ -101,7 +28,7 @@ export default function TrackAmbulance() {
   const socketRef = useRef(null);
   const startTimeRef = useRef(Date.now());
 
-  // Critique #18: Scrub cryptographic token from URL address bar on mount to prevent leakage via browser history and referrer headers
+  // Scrub cryptographic token from URL address bar on mount
   useEffect(() => {
     const rawToken = searchParams.get('token');
     if (rawToken) {
@@ -129,7 +56,7 @@ export default function TrackAmbulance() {
     return () => clearInterval(timer);
   }, []);
 
-  // Socket.io connection with signed cryptographic token authentication (Critique #18)
+  // Socket.io connection with signed cryptographic token authentication
   useEffect(() => {
     if (!alertId) return;
 
@@ -228,8 +155,7 @@ export default function TrackAmbulance() {
         (pos) => {
           setBrowserPos([pos.coords.latitude, pos.coords.longitude]);
         },
-        (err) => {
-          // Guaranteed fallback so the map NEVER stays stuck on loading
+        () => {
           setBrowserPos([12.97187, 79.16541]);
         },
         { enableHighAccuracy: true, timeout: 4000 }
@@ -237,12 +163,9 @@ export default function TrackAmbulance() {
     }
   }, [browserPos]);
 
-  const patientIcon = useMemo(() => createPatientIcon(), []);
-  const doctorIcon = useMemo(() => createDoctorIcon(), []);
-
   if (!alertId) {
     return (
-      <section className="card" style={{ textAlign: 'center' }}>
+      <section className="card" style={{ textAlign: 'center', maxWidth: '600px', margin: '40px auto' }}>
         <div className="heading">
           <span className="eyebrow">Tracking</span>
           <h1>No active emergency.</h1>
@@ -259,7 +182,6 @@ export default function TrackAmbulance() {
     ? [parseFloat(alertDetails.latitude), parseFloat(alertDetails.longitude)]
     : (browserPos || [12.97187, 79.16541]);
 
-  // Real Doctor GPS location - strictly from live doctorLoc (socket) or alertDetails (database)
   const doctorPos = (doctorLoc?.latitude && doctorLoc?.longitude)
     ? [parseFloat(doctorLoc.latitude), parseFloat(doctorLoc.longitude)]
     : (alertDetails?.doctorLat && alertDetails?.doctorLng
@@ -271,214 +193,289 @@ export default function TrackAmbulance() {
     !alertDetails?.description?.includes('Outdoor SOS')
   );
 
-  const distance = patientPos && doctorPos
-    ? getDistance(patientPos[0], patientPos[1], doctorPos[0], doctorPos[1])
-    : null;
+  // Calculate live road route
+  useEffect(() => {
+    if (!patientPos || !doctorPos) return;
+    let isCancelled = false;
+
+    const loadRoute = async () => {
+      try {
+        const route = await fetchRoadRoute({
+          doctorPos,
+          patientPos,
+          alertId,
+          isAdmitted
+        });
+        if (!isCancelled && route) {
+          setRouteData(route);
+        }
+      } catch (err) {
+        console.warn('Road routing error:', err);
+      }
+    };
+
+    loadRoute();
+    const interval = setInterval(loadRoute, 8000);
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [patientPos?.[0], patientPos?.[1], doctorPos?.[0], doctorPos?.[1], alertId, isAdmitted]);
+
+  const effectiveDoctorPos = (routeData?.adjustedPos && !doctorLoc)
+    ? routeData.adjustedPos
+    : doctorPos;
+
+  const rawMeters = routeData?.distanceMeters ?? (patientPos && effectiveDoctorPos
+    ? getHaversineDistance(patientPos[0], patientPos[1], effectiveDoctorPos[0], effectiveDoctorPos[1])
+    : null);
+
+  const liveDistanceFormatted = routeData?.distanceFormatted || (rawMeters !== null ? formatRoadDistance(rawMeters, isAdmitted) : 'Locating...');
+  const liveEtaFormatted = routeData?.etaFormatted || (rawMeters !== null ? formatRoadETA(Math.round(rawMeters / 11), rawMeters, isAdmitted) : 'Calculating...');
 
   const elapsedMin = Math.floor(elapsed / 60);
   const elapsedSec = elapsed % 60;
 
   return (
-    <div className="track-page">
-      {/* Indoor Ward Notification */}
-      {isAdmitted && (
-        <div style={{
-          position: 'absolute',
-          top: '16px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.92)',
-          border: '1px solid #14b8a6',
-          borderRadius: '30px',
-          padding: '8px 20px',
-          color: '#5eead4',
-          fontSize: '0.85rem',
-          fontWeight: '600',
-          boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          maxWidth: '90%',
-          textAlign: 'center'
-        }}>
-          <span>🏥</span>
-          <span>
-            {alertDetails?.hospitalName ? `${alertDetails.hospitalName} Ward Dispatch: ` : 'Indoor Ward Dispatch: '}
-            Patient is admitted inside facility. Responding on foot.
-          </span>
-        </div>
-      )}
+    <div style={{ minHeight: '100vh', background: '#0a1214', color: '#f8fafc', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      
+      {/* Container constraint */}
+      <div style={{ maxWidth: '820px', width: '100%', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-      {/* Responder Signal Lost Warning */}
-      {signalLost && (
-        <div style={{
-          position: 'absolute',
-          top: isAdmitted ? '65px' : '16px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000,
-          background: 'rgba(245, 158, 11, 0.96)',
-          border: '1px solid #d97706',
-          borderRadius: '30px',
-          padding: '8px 20px',
-          color: '#1c1917',
-          fontSize: '0.85rem',
-          fontWeight: '700',
-          boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          maxWidth: '90%',
-          textAlign: 'center'
-        }}>
-          <span>⚠️</span>
-          <span>{signalLostMsg || 'Telemetric signal temporarily lost from responder. Device reconnecting... Active dispatch is retained.'}</span>
-        </div>
-      )}
+        {/* Top Header Navigation */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 18px' }}>
+          <button
+            type="button"
+            className="btn-sm"
+            style={{ background: 'transparent', color: '#5eead4', border: '1px solid #14b8a6', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+            onClick={() => navigate('/patient-dashboard')}
+          >
+            ← Back to Dashboard
+          </button>
 
-      {/* ─── Map ─── */}
-      <div className="track-map-container">
-        <MapContainer
-          center={patientPos}
-          zoom={15}
-          style={{ height: '100%', width: '100%' }}
-          zoomControl={false}
-        >
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          />
-          <FitBounds patientPos={patientPos} doctorPos={doctorPos} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 10px #22c55e' }}></span>
+            <span style={{ fontSize: '0.85rem', color: '#cbd5e1', fontWeight: '600' }}>
+              Live Telemetry Active • SOS #{alertId}
+            </span>
+          </div>
 
-          {/* Patient marker */}
-          <Marker position={patientPos} icon={patientIcon}>
-            <Popup className="custom-popup">
-              <strong>📍 Your Location</strong>
-              <br />
-              <span style={{ fontSize: '11px', color: '#6b8891' }}>
-                {patientPos[0].toFixed(5)}, {patientPos[1].toFixed(5)}
-              </span>
-            </Popup>
-          </Marker>
-
-          {/* Doctor marker */}
-          {doctorPos && (
-            <Marker position={doctorPos} icon={doctorIcon}>
-              <Popup className="custom-popup">
-                <strong>🩺 Dr. {alertDetails?.doctorname || 'Physician'}</strong>
-                <br />
-                <span style={{ fontSize: '11px', color: '#6b8891' }}>
-                  {distance ? `${formatDistance(distance, isAdmitted)} away` : 'Live GPS active'}
-                </span>
-              </Popup>
-            </Marker>
-          )}
-
-          {/* Route polyline */}
-          {patientPos && doctorPos && (
-            <Polyline
-              positions={[doctorPos, patientPos]}
-              pathOptions={{
-                color: '#5ce0d5',
-                weight: 4,
-                opacity: 0.8,
-                dashArray: '12 8',
-                lineCap: 'round'
-              }}
-            />
-          )}
-        </MapContainer>
-      </div>
-
-      {/* ─── Bottom overlay panel ─── */}
-      <div className="track-overlay">
-        {/* Status indicator */}
-        <div className="track-status-bar">
-          <div className={`track-status-dot ${alertDetails?.status === 'TRANSPORTING' ? 'transporting' : (alertDetails?.status === 'DISPATCHED' ? 'confirmed' : 'pending')}`}></div>
-          <span className="track-status-text">
-            {alertDetails?.status === 'TRANSPORTING'
-              ? `🚑 Patient secured — En route to ${alertDetails?.hospitalName || 'hospital'} with medical team`
-              : (alertDetails?.status === 'DISPATCHED'
-                  ? (isAdmitted
-                      ? 'Doctor confirmed — heading directly to your ward on foot'
-                      : (doctorPos ? 'Doctor confirmed — heading to you now' : 'Doctor confirmed — acquiring doctor GPS...'))
-                  : 'Finding nearest doctor...')}
-          </span>
+          <a
+            href="tel:911"
+            style={{ textDecoration: 'none', background: '#dc2626', color: '#fff', padding: '6px 14px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+          >
+            🚨 Call 911
+          </a>
         </div>
 
-        {/* Doctor info card */}
-        {alertDetails && (
-          <div className="track-doctor-card">
-            <div className="track-doctor-avatar">
-              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
-              </svg>
+        {/* Indoor Ward Notification */}
+        {isAdmitted && (
+          <div style={{ background: '#042f2e', border: '1px solid #14b8a6', borderRadius: '12px', padding: '14px 18px', color: '#ccfbf1', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '24px' }}>🏥</span>
+            <div>
+              <strong style={{ color: '#5eead4', fontSize: '0.95rem' }}>IN-HOSPITAL WARD DISPATCH</strong>
+              <div style={{ fontSize: '0.85rem', color: '#99f6e4', marginTop: '2px' }}>
+                {alertDetails?.hospitalName ? `${alertDetails.hospitalName}: ` : ''}Physician is responding on foot within your facility.
+              </div>
             </div>
-            <div className="track-doctor-info">
-              <h3>Dr. {alertDetails.doctorname}</h3>
-              <span>{alertDetails.specialization}</span>
-              {alertDetails.isFallback && (
-                <div style={{ marginTop: '4px', padding: '3px 8px', borderRadius: '4px', background: '#fef3c7', color: '#92400e', fontSize: '11px', fontWeight: '600' }}>
-                  ⚠️ Specialist Fallback: Closest Emergency Physician
-                </div>
-              )}
-              {alertDetails.hospitalName && (
-                <span style={{ display: 'block', fontSize: '12px', color: '#5eead4', marginTop: '3px', fontWeight: '500' }}>
-                  🏥 {alertDetails.hospitalName}
-                </span>
-              )}
-              {alertDetails.vehiclePlate && (
-                <span style={{ display: 'block', fontSize: '12px', color: '#38bdf8', marginTop: '3px', fontWeight: '500' }}>
-                  🚑 Ambulance: {alertDetails.vehiclePlate} ({alertDetails.vehicleType || 'Emergency Unit'})
-                </span>
-              )}
-            </div>
-            <a href={`tel:${alertDetails.doctorphone}`} className="track-call-btn" title="Call doctor">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-              </svg>
-            </a>
           </div>
         )}
 
-        {/* Live metrics */}
-        <div className="track-metrics">
-          <div className="track-metric">
-            <span className="track-metric-label">Distance</span>
-            <strong className="track-metric-value">
-              {distance !== null ? formatDistance(distance, isAdmitted) : 'Locating...'}
-            </strong>
+        {/* Responder Signal Lost Warning */}
+        {signalLost && (
+          <div style={{ background: '#78350f', border: '1px solid #d97706', borderRadius: '12px', padding: '14px 18px', color: '#fef3c7', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '24px' }}>⚠️</span>
+            <div>
+              <strong style={{ color: '#fbbf24', fontSize: '0.95rem' }}>SIGNAL RECONNECTING</strong>
+              <div style={{ fontSize: '0.85rem', color: '#fef3c7', marginTop: '2px' }}>
+                {signalLostMsg || 'Telemetric signal temporarily lost from responder. Device reconnecting... Active dispatch is retained.'}
+              </div>
+            </div>
           </div>
-          <div className="track-metric">
-            <span className="track-metric-label">Est. Arrival</span>
-            <strong className="track-metric-value accent">
-              {distance !== null ? formatETA(distance, isAdmitted) : 'Locating...'}
-            </strong>
+        )}
+
+        {/* Hero Live Distance Card */}
+        <div style={{
+          background: 'linear-gradient(145deg, #0f1f24, #12282d)',
+          border: '1px solid rgba(92, 224, 213, 0.3)',
+          borderRadius: '16px',
+          padding: '28px 24px',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <span style={{ fontSize: '0.82rem', color: '#5eead4', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 'bold' }}>
+              Real-Time Emergency Road Telemetry
+            </span>
+            <span style={{ fontSize: '0.8rem', background: 'rgba(94, 234, 212, 0.1)', border: '1px solid rgba(94, 234, 212, 0.3)', color: '#5eead4', padding: '4px 10px', borderRadius: '20px' }}>
+              ⏱️ Elapsed: {elapsedMin}:{String(elapsedSec).padStart(2, '0')}
+            </span>
           </div>
-          <div className="track-metric">
-            <span className="track-metric-label">Elapsed</span>
-            <strong className="track-metric-value">{elapsedMin}:{String(elapsedSec).padStart(2, '0')}</strong>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', alignItems: 'center' }}>
+            {/* Live Distance Figure */}
+            <div>
+              <div style={{ fontSize: '0.9rem', color: '#94a3b8', marginBottom: '4px' }}>Live Distance to Patient</div>
+              <div style={{ fontSize: '3.2rem', fontWeight: '900', color: '#38bdf8', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                {liveDistanceFormatted}
+              </div>
+              <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '8px' }}>
+                🛣️ Calculated via Live Road Network
+              </div>
+            </div>
+
+            {/* Estimated Arrival Time Figure */}
+            <div style={{ background: 'rgba(255,255,255,0.04)', padding: '18px 22px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '4px' }}>Estimated Arrival (ETA)</div>
+              <div style={{ fontSize: '2.2rem', fontWeight: '800', color: '#34d399', lineHeight: 1.1 }}>
+                {liveEtaFormatted}
+              </div>
+              <div style={{ fontSize: '0.82rem', color: '#a7f3d0', marginTop: '6px' }}>
+                {isAdmitted ? 'Direct on-foot transit' : 'Priority emergency road navigation'}
+              </div>
+            </div>
+          </div>
+
+          {/* Visual Distance Proximity Bar */}
+          <div style={{ marginTop: '28px', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', padding: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#94a3b8', marginBottom: '8px' }}>
+              <span>📍 Your Location</span>
+              <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>🩺 Clinician Responding ({liveDistanceFormatted})</span>
+              <span>🏥 Receiving Facility</span>
+            </div>
+            <div style={{ height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', position: 'relative', overflow: 'hidden' }}>
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                bottom: 0,
+                width: '65%',
+                background: 'linear-gradient(90deg, #22c55e, #38bdf8)',
+                borderRadius: '4px'
+              }}></div>
+            </div>
           </div>
         </div>
 
-        {/* Reassurance */}
-        <div className="track-reassurance" key={msgIndex}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-          </svg>
-          <span>{REASSURANCE_MESSAGES[msgIndex]}</span>
+        {/* Assigned Medical Team & Vehicle Card */}
+        {alertDetails && (
+          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '24px' }}>
+            <div style={{ fontSize: '0.85rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '14px', fontWeight: 'bold' }}>
+              Assigned Emergency Care Unit
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{ width: '56px', height: '56px', borderRadius: '14px', background: 'linear-gradient(135deg, #0f766e, #0ea5e9)', display: 'grid', placeItems: 'center', fontSize: '26px' }}>
+                  🩺
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#fff' }}>Dr. {alertDetails.doctorname}</h3>
+                  <div style={{ fontSize: '0.9rem', color: '#38bdf8', marginTop: '2px' }}>{alertDetails.specialization}</div>
+                  {alertDetails.hospitalName && (
+                    <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginTop: '2px' }}>🏥 {alertDetails.hospitalName}</div>
+                  )}
+                  {alertDetails.vehiclePlate && (
+                    <div style={{ fontSize: '0.82rem', color: '#38bdf8', marginTop: '2px', fontWeight: '600' }}>
+                      🚑 Ambulance: {alertDetails.vehiclePlate} ({alertDetails.vehicleType || 'EMS Emergency Unit'})
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {alertDetails.doctorphone && (
+                  <a
+                    href={`tel:${alertDetails.doctorphone}`}
+                    style={{
+                      background: '#0f766e',
+                      color: '#fff',
+                      textDecoration: 'none',
+                      padding: '12px 20px',
+                      borderRadius: '8px',
+                      fontWeight: 'bold',
+                      fontSize: '0.9rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    📞 Call Doctor
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* Specialist Fallback Notice if triggered */}
+            {alertDetails.isFallback && (
+              <div style={{ marginTop: '16px', padding: '10px 14px', borderRadius: '8px', background: '#fef3c7', border: '1px solid #f59e0b', color: '#92400e', fontSize: '0.85rem' }}>
+                <strong>⚠️ Specialist Fallback Notice:</strong> Closest emergency physician dispatched immediately for initial stabilization while specialist is on standby.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* GPS Coordinates & Direct Navigation */}
+        <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <div style={{ fontSize: '0.82rem', color: '#94a3b8' }}>Patient Location (GPS)</div>
+            <div style={{ fontSize: '0.95rem', color: '#f1f5f9', fontWeight: 'bold' }}>
+              {patientPos ? `${patientPos[0].toFixed(5)}, ${patientPos[1].toFixed(5)}` : 'Resolving GPS...'}
+            </div>
+            {effectiveDoctorPos && (
+              <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px' }}>
+                Doctor GPS: {effectiveDoctorPos[0].toFixed(5)}, {effectiveDoctorPos[1].toFixed(5)}
+              </div>
+            )}
+          </div>
+
+          {patientPos && (
+            <a
+              href={`https://www.google.com/maps/dir/?api=1&destination=${patientPos[0]},${patientPos[1]}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                background: 'rgba(56, 189, 248, 0.1)',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                color: '#38bdf8',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                textDecoration: 'none',
+                fontSize: '0.85rem',
+                fontWeight: '600',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              🧭 Open Google Maps Navigation ↗
+            </a>
+          )}
         </div>
 
-        {/* Actions */}
-        <div className="track-actions" style={{ display: 'flex', gap: '10px' }}>
-          <button className="btn navy track-back-btn" style={{ flex: 1 }} onClick={() => navigate('/patient-dashboard')}>
+        {/* Reassurance Message Card */}
+        <div style={{ background: 'rgba(92, 224, 213, 0.06)', border: '1px solid rgba(92, 224, 213, 0.2)', borderRadius: '12px', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '20px' }}>💚</span>
+          <span style={{ fontSize: '0.92rem', color: '#ccfbf1', fontWeight: '500' }}>
+            {REASSURANCE_MESSAGES[msgIndex]}
+          </span>
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
+          <button
+            type="button"
+            className="btn"
+            style={{ flex: 1, padding: '14px', background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+            onClick={() => navigate('/patient-dashboard')}
+          >
             ← Back to Dashboard
           </button>
           <button
+            type="button"
             className="btn"
-            style={{ flex: 1, background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
+            style={{ flex: 1, padding: '14px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
             onClick={async () => {
               if (window.confirm("Are you sure you want to cancel this emergency request? Dispatched medical personnel and vehicle will be immediately released back to duty.")) {
                 try {
@@ -496,9 +493,10 @@ export default function TrackAmbulance() {
               }
             }}
           >
-            ❌ Cancel SOS
+            ❌ Cancel Emergency SOS
           </button>
         </div>
+
       </div>
     </div>
   );

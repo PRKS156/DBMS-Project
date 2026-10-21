@@ -76,26 +76,48 @@ function calculateBearing(lat1, lon1, lat2, lon2) {
     return ((θ * 180) / Math.PI + 360) % 360;
 }
 
+function decodePolyline(encoded) {
+    const points = [];
+    let index = 0, len = encoded.length;
+    let lat = 0, lng = 0;
+    while (index < len) {
+        let b, shift = 0, result = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lat += dlat;
+        shift = 0;
+        result = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lng += dlng;
+        points.push([lat / 1e5, lng / 1e5]);
+    }
+    return points;
+}
+
 /**
  * Queries OSRM road network routing engine to get true road distances and driving durations (ETAs)
  * for candidate destinations from a single origin.
  * Resolves critique #1: Doctors separated by rivers, rails, or one-way street networks are ranked by actual road-network driving time.
- * Falls back gracefully to Haversine estimations if OSRM is unreachable or times out (> 2500ms).
- *
- * @param {number} originLat Origin latitude
- * @param {number} originLng Origin longitude
- * @param {Array<{lat: number, lng: number}>} destinationList Array of destination coordinates
- * @returns {Promise<Array<{roadDistanceMeters: number, roadDurationSeconds: number, isRoadAccurate: boolean}>>}
+ * Falls back gracefully to Haversine estimations if OSRM is unreachable or times out (> 5000ms).
  */
 async function getRoadRoutingTable(originLat, originLng, destinationList) {
     if (!destinationList || destinationList.length === 0) return [];
 
     const coords = [`${originLng},${originLat}`, ...destinationList.map(d => `${d.lng},${d.lat}`)].join(';');
-    const url = `http://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=duration,distance`;
+    const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=duration,distance`;
 
     try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2500);
+        const timeout = setTimeout(() => controller.abort(), 5000);
 
         const response = await fetch(url, { signal: controller.signal });
         clearTimeout(timeout);
@@ -126,7 +148,7 @@ async function getRoadRoutingTable(originLat, originLng, destinationList) {
             });
         }
     } catch (err) {
-        console.warn('⚠️ OSRM road routing unavailable or timed out, using Haversine heuristic:', err.message);
+        console.warn('⚠️ OSRM road routing matrix unavailable or timed out, using Haversine heuristic:', err.message);
     }
 
     return destinationList.map(dest => {
@@ -139,10 +161,118 @@ async function getRoadRoutingTable(originLat, originLng, destinationList) {
     });
 }
 
+/**
+ * Calculates a complete real-world street driving route between origin and destination.
+ * Checks for user-provided commercial APIs (Google Maps, OpenRouteService) or uses built-in OSRM.
+ * Returns exact road network turn-by-turn coordinates [lat, lng], actual driving distance, and true road ETA.
+ */
+async function getRealRoadRoute(originLat, originLng, destLat, destLng) {
+    const fallbackDist = getDistance(originLat, originLng, destLat, destLng);
+    const fallbackMeters = Math.round(fallbackDist * 1.3);
+    const fallbackDuration = Math.round((fallbackMeters / (40 * 1000 / 3600)));
+    const straightLineCoords = [[originLat, originLng], [destLat, destLng]];
+
+    // 1. Google Maps Directions API (if GOOGLE_MAPS_API_KEY configured)
+    if (process.env.GOOGLE_MAPS_API_KEY) {
+        try {
+            const googleUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${originLat},${originLng}&destination=${destLat},${destLng}&mode=driving&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 6000);
+            const res = await fetch(googleUrl, { signal: controller.signal });
+            clearTimeout(timeout);
+            const data = await res.json();
+            if (data.status === 'OK' && data.routes && data.routes[0]) {
+                const leg = data.routes[0].legs[0];
+                const points = decodePolyline(data.routes[0].overview_polyline.points);
+                return {
+                    roadDistanceMeters: leg.distance.value,
+                    roadDurationSeconds: leg.duration.value,
+                    distanceFormatted: formatDistance(leg.distance.value),
+                    etaFormatted: formatETA(leg.distance.value),
+                    coordinates: points,
+                    provider: 'Google Maps Directions API',
+                    isRoadAccurate: true
+                };
+            }
+        } catch (err) {
+            console.warn('⚠️ Google Maps Directions query failed, falling back to OSRM:', err.message);
+        }
+    }
+
+    // 2. OpenRouteService API (if OPENROUTESERVICE_API_KEY configured)
+    if (process.env.OPENROUTESERVICE_API_KEY) {
+        try {
+            const orsUrl = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${process.env.OPENROUTESERVICE_API_KEY}&start=${originLng},${originLat}&end=${destLng},${destLat}`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 6000);
+            const res = await fetch(orsUrl, { signal: controller.signal });
+            clearTimeout(timeout);
+            const data = await res.json();
+            if (data.features && data.features[0]) {
+                const summary = data.features[0].properties.summary;
+                const coords = data.features[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                return {
+                    roadDistanceMeters: Math.round(summary.distance),
+                    roadDurationSeconds: Math.round(summary.duration),
+                    distanceFormatted: formatDistance(summary.distance),
+                    etaFormatted: formatETA(summary.distance),
+                    coordinates: coords,
+                    provider: 'OpenRouteService API',
+                    isRoadAccurate: true
+                };
+            }
+        } catch (err) {
+            console.warn('⚠️ OpenRouteService query failed, falling back to OSRM:', err.message);
+        }
+    }
+
+    // 3. Built-in Open Source Routing Machine (OSRM) over HTTPS
+    try {
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=full&geometries=geojson`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch(osrmUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (res.ok) {
+            const data = await res.json();
+            if (data.code === 'Ok' && data.routes && data.routes[0]) {
+                const route = data.routes[0];
+                // GeoJSON is [lng, lat] -> convert to Leaflet [lat, lng]
+                const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+                return {
+                    roadDistanceMeters: Math.round(route.distance),
+                    roadDurationSeconds: Math.round(route.duration),
+                    distanceFormatted: formatDistance(route.distance),
+                    etaFormatted: formatETA(route.distance),
+                    coordinates: coords,
+                    provider: 'Open Source Routing Machine (OSRM)',
+                    isRoadAccurate: true
+                };
+            }
+        }
+    } catch (err) {
+        console.warn('⚠️ OSRM route fetch failed, using fallback heuristic:', err.message);
+    }
+
+    // 4. Safe fallback
+    return {
+        roadDistanceMeters: fallbackMeters,
+        roadDurationSeconds: fallbackDuration,
+        distanceFormatted: formatDistance(fallbackMeters),
+        etaFormatted: formatETA(fallbackMeters),
+        coordinates: straightLineCoords,
+        provider: 'Heuristic Estimate',
+        isRoadAccurate: false
+    };
+}
+
 module.exports = {
     getDistance,
     formatDistance,
     formatETA,
     calculateBearing,
-    getRoadRoutingTable
+    getRoadRoutingTable,
+    getRealRoadRoute,
+    decodePolyline
 };

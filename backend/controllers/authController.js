@@ -85,32 +85,50 @@ exports.login = async (req, res) => {
 
 /**
  * Clearly labelled Evaluator Demo Mode Login
- * Allows project evaluators and reviewers to immediately test role-based portals
- * (Admin Console, Regional Dispatcher, Field Doctor, Patient SOS) without credential friction.
+ * Strictly gated behind DEMO_MODE=true to prevent arbitrary admin login on public deployments.
+ * Limited exclusively to seeded demo accounts.
  */
 exports.demoLogin = async (req, res) => {
   try {
-    const { role } = req.body; // 'ADMIN', 'DISPATCHER', 'DOCTOR', 'PATIENT'
-    let targetUser = null;
+    // 1. Gate demo login behind DEMO_MODE=true; return 404 otherwise
+    if (process.env.DEMO_MODE !== 'true') {
+      return res.status(404).json({ error: "Endpoint not found" });
+    }
 
+    const { role } = req.body; // 'ADMIN', 'DISPATCHER', 'DOCTOR', 'PATIENT'
+
+    // 2. Limit strictly to seeded demo accounts
+    const SEEDED_DEMO_EMAILS = {
+      ADMIN: 'admin@vit.edu',
+      DISPATCHER: 'admin@vit.edu',
+      DOCTOR: 'dr.ramesh@medrelay.com',
+      PATIENT: 'john.doe@medrelay.com'
+    };
+
+    const targetEmail = SEEDED_DEMO_EMAILS[role];
+    if (!targetEmail) {
+      return res.status(400).json({ error: `Invalid demo role requested: ${role}` });
+    }
+
+    let targetUser = null;
     if (role === 'ADMIN' || role === 'DISPATCHER') {
       targetUser = await prisma.user.findFirst({
-        where: { role: 'ADMIN', isActive: true }
+        where: { email: targetEmail, role: 'ADMIN', isActive: true }
       });
     } else if (role === 'DOCTOR') {
       targetUser = await prisma.user.findFirst({
-        where: { role: 'DOCTOR', isActive: true },
+        where: { email: targetEmail, role: 'DOCTOR', isActive: true },
         include: { doctorProfile: true }
       });
-    } else {
+    } else if (role === 'PATIENT') {
       targetUser = await prisma.user.findFirst({
-        where: { role: 'PATIENT', isActive: true },
+        where: { email: targetEmail, role: 'PATIENT', isActive: true },
         include: { patientProfile: true }
       });
     }
 
     if (!targetUser) {
-      return res.status(404).json({ error: `No active ${role} found for demo session.` });
+      return res.status(404).json({ error: `No active seeded ${role} account found for demo session.` });
     }
 
     let fullName = targetUser.email;

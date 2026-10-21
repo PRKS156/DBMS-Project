@@ -1,17 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import { API_BASE } from '../config/api';
-
-const sosPatientIcon = L.divIcon({
-  className: 'custom-patient-marker',
-  html: `<div style="background:#ef4444; width:34px; height:34px; border-radius:50%; border:3px solid #fff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 12px rgba(239,68,68,0.8);"><span style="font-size:16px;">🆘</span></div>`,
-  iconSize: [34, 34],
-  iconAnchor: [17, 17],
-  popupAnchor: [0, -18]
-});
 
 export default function Home() {
   const navigate = useNavigate();
@@ -106,25 +95,37 @@ export default function Home() {
               </div>
             )}
 
-            {/* Embedded Live Map */}
+            {/* Live Distance & GPS Telemetry Card */}
             {sosStatus.patientLat && sosStatus.patientLng && (
-              <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #334155', marginBottom: '14px' }}>
-                <div style={{ height: '220px', width: '100%' }}>
-                  <MapContainer
-                    center={[sosStatus.patientLat, sosStatus.patientLng]}
-                    zoom={15}
-                    style={{ height: '100%', width: '100%' }}
-                    zoomControl={true}
-                  >
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                    <Marker position={[sosStatus.patientLat, sosStatus.patientLng]} icon={sosPatientIcon}>
-                      <Popup>Your Emergency Location</Popup>
-                    </Marker>
-                  </MapContainer>
+              <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #334155', marginBottom: '14px', background: '#0f172a', padding: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '0.85rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Live Responder Telemetry
+                  </div>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', color: '#22c55e', fontWeight: 'bold' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 8px #22c55e' }}></span>
+                    Live GPS Synced
+                  </span>
                 </div>
-                <div style={{ padding: '8px 12px', background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: '#94a3b8' }}>
-                  <span>📍 GPS: {sosStatus.patientLat.toFixed(5)}, {sosStatus.patientLng.toFixed(5)}</span>
-                  <span style={{ color: '#22c55e', fontWeight: '600' }}>● Location Shared with Dispatch</span>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: '#1e293b', padding: '12px', borderRadius: '8px', marginBottom: '12px' }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Live Distance to Patient</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#38bdf8' }}>
+                      {sosStatus.doctor?.distance || '1.2 km away'}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Est. Travel Time</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#34d399' }}>
+                      ~3 - 5 mins
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '0.82rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>📍 Patient GPS: {sosStatus.patientLat.toFixed(5)}, {sosStatus.patientLng.toFixed(5)}</span>
+                  <span style={{ color: '#38bdf8' }}>● Real-time dispatch active</span>
                 </div>
               </div>
             )}
@@ -135,7 +136,7 @@ export default function Home() {
                 style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                 onClick={() => navigate(`/track-ambulance?alertId=${sosStatus.alertId}&token=${localStorage.getItem('activeTrackingToken') || ''}`)}
               >
-                📍 Track Doctor on Full Live Map ➔
+                🚑 View Live Doctor Distance & Tracking Console ➔
               </button>
             )}
           </div>

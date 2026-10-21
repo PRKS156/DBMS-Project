@@ -130,6 +130,14 @@ async function main() {
       "comments" TEXT,
       "createdAt" TIMESTAMP,
       "archivedAt" TIMESTAMP DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS "AlertStatusAuditArchive" (
+      "auditId" INT PRIMARY KEY,
+      "alertId" INT NOT NULL,
+      "oldStatus" VARCHAR(50),
+      "newStatus" VARCHAR(50),
+      "changedAt" TIMESTAMP,
+      "archivedAt" TIMESTAMP DEFAULT NOW()
     );`
   ];
 
@@ -174,7 +182,22 @@ async function main() {
         AND a.status = 'COMPLETED' 
         AND a."updatedAt" < v_cutoff;
 
-      -- Step 3: Move parent EmergencyAlert rows
+      -- Step 3: Move AlertStatusAudit child records belonging to eligible completed alerts
+      -- (Prevents foreign key violation on EmergencyAlert deletion when audit rows exist)
+      INSERT INTO "AlertStatusAuditArchive" ("auditId", "alertId", "oldStatus", "newStatus", "changedAt", "archivedAt")
+      SELECT aud."auditId", aud."alertId", aud."oldStatus", aud."newStatus", aud."changedAt", NOW()
+      FROM "AlertStatusAudit" aud
+      JOIN "EmergencyAlert" a ON aud."alertId" = a."id"
+      WHERE a.status = 'COMPLETED' AND a."updatedAt" < v_cutoff
+      ON CONFLICT ("auditId") DO NOTHING;
+
+      DELETE FROM "AlertStatusAudit" aud
+      USING "EmergencyAlert" a
+      WHERE aud."alertId" = a."id"
+        AND a.status = 'COMPLETED' 
+        AND a."updatedAt" < v_cutoff;
+
+      -- Step 4: Move parent EmergencyAlert rows
       INSERT INTO "EmergencyAlertArchive" ("id", "patientId", "latitude", "longitude", "status", "description", "createdAt", "archivedAt")
       SELECT a."id", a."patientId", a."latitude", a."longitude", a."status"::text, a."description", a."createdAt", NOW()
       FROM "EmergencyAlert" a

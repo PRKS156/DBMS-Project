@@ -8,6 +8,8 @@ router.post('/trigger', alertController.triggerAlert);
 router.get('/patient/:patientId/active', alertController.getPatientActiveAlert);
 router.get('/doctor/:doctorId', alertController.getDoctorAlerts);
 router.get('/active-view', authenticateToken, requireRole('ADMIN', 'DISPATCHER'), alertController.getActiveEmergenciesView);
+router.get('/route', alertController.getRealRoute);
+router.get('/:id/route', alertController.getAlertRoute);
 router.get('/:id/status', alertController.getAlertStatus);
 router.patch('/:id/acknowledge', alertController.acknowledgeAlert);
 router.patch('/:id/transport', alertController.transportAlert);

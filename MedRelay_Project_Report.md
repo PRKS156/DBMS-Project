@@ -53,7 +53,8 @@ MedRelay is an integrated emergency response platform built on a centralized, no
 13. Expected Outcomes and Benefits
 14. SDG Alignment
 15. Proposed Technical Architecture
-16. Conclusion
+16. Known Practical and Architectural Limitations
+17. Conclusion
 
 <hr/>
 
@@ -219,8 +220,20 @@ The overall architecture is organized in layers, from the user-facing applicatio
 
 User requests pass through authentication and role-based access control to the backend API. The API reads and writes emergency data in PostgreSQL through Prisma ORM, and routes live events through the Socket server.
 
-## 16. Conclusion
+## 16. Known Practical and Architectural Limitations
+
+While MedRelay enforces strict database normalization, ACID concurrency control, and audit compliance, the system operates under several practical and infrastructure limitations:
+
+1. **In-Memory Rate Limiting:** The IP sliding-window rate limiter (**15 requests per 10 minutes**, `RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000`) is maintained in Node.js process memory (`rateLimitMap`). Counters reset if the backend process restarts. In a multi-replica or auto-scaling production deployment, rate-limiting state must be backed by a distributed key-value store such as Redis.
+2. **Render Free-Tier Idle Sleep:** The backend REST API and WebSocket gateway are hosted on Render's free tier, which suspends containers after 15 minutes of inactivity. Background retry loops pause during sleep, and incoming cold-start requests incur a 30–50 second wake-up latency. Production requires continuous compute or external health pingers.
+3. **No Column-Level Database Encryption:** Sensitive medical histories and clinical notes are protected in transit via TLS 1.3 (HTTPS/WSS) and at rest via volume-level storage encryption (Supabase AWS EBS AES-256). However, application-level column encryption (such as PostgreSQL `pgcrypto` field-level encryption for clinical notes) is not implemented in this prototype; protection relies on relational role-based access control (RBAC).
+4. **Mobile Browser GPS Throttling:** Mobile operating systems (iOS Safari and Android Chrome) aggressively throttle or pause Geolocation updates (`watchPosition`) when the device screen locks or the tab enters the background. Because MedRelay enforces a strict **60-second telemetry cutoff** (`STALE_TIMEOUT_MS = 60 * 1000`) to guarantee responders are physically reachable, clinicians must keep the browser tab active and screen awake during their shift.
+5. **Public OSRM Demonstration Server:** Road-network driving distance and ETA estimations rely on the public Open Source Routing Machine (OSRM) demonstration server (`router.project-osrm.org`), which lacks contractual SLAs and live traffic congestion feeds. Production deployment requires a dedicated, containerized OSRM instance with traffic overlays.
+
+Additionally, bystander/patient tracking tokens enforce a strict **2-hour expiry** (`expiresIn: '2h'`) to limit URL leak exposure, and evaluator demo access is gated behind the `DEMO_MODE=true` environment flag, limited exclusively to pre-seeded demo accounts (`admin@vit.edu`, `dr.ramesh@medrelay.com`, `john.doe@medrelay.com`).
+
+## 17. Conclusion
 
 MedRelay proposes an integrated emergency management platform for improving the organization, speed, and accuracy of emergency healthcare response. The system combines PostgreSQL-based relational database management, Prisma ORM, database normalization, role-based access control, real-time WebSockets, and geolocation mapping.
 
-The proposed solution addresses common limitations of fragmented emergency response systems and demonstrates how database technologies can be combined with modern real-time and spatial techniques to create a more reliable and intelligent healthcare dispatch platform.
+Rather than claiming to eliminate every practical operational challenge, MedRelay establishes a robust database architecture with ACID transactional guarantees that systematically resolves core concurrency, spatial routing, and audit retention problems while transparently documenting real-world operational tradeoffs.

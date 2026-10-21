@@ -113,49 +113,7 @@ export default function PatientAccess() {
             <button className="btn red" type="submit">Sign in securely <span aria-hidden="true">→</span></button>
           </form>
 
-          {/* Evaluator Quick Demo Login */}
-          <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
-            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-light)', fontWeight: 600 }}>
-              Evaluator Quick Access (Demo Mode)
-            </span>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const res = await fetch(`${API_BASE}/api/auth/demo-login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ role: 'PATIENT' })
-                  });
-                  const data = await res.json();
-                  if (res.ok) {
-                    localStorage.clear();
-                    localStorage.setItem('token', data.token);
-                    localStorage.setItem('role', data.role);
-                    localStorage.setItem('name', data.name);
-                    localStorage.setItem('userId', data.userId);
-                    navigate('/patient-dashboard');
-                  } else {
-                    setError(data.error || 'Demo login failed');
-                  }
-                } catch(e) { setError('Demo login failed'); }
-              }}
-              style={{
-                marginTop: '0.5rem',
-                width: '100%',
-                background: 'rgba(239, 68, 68, 0.12)',
-                border: '1px solid #ef4444',
-                color: '#f87171',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: '0.85rem'
-              }}
-            >
-              ⚡ Quick Evaluator Login: Patient Profile (John Doe)
-            </button>
-          </div>
+
 
           {error && <div className="result error" style={{display:'block'}}>{error}</div>}
           <div className="screen-footer">

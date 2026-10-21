@@ -50,6 +50,12 @@ async function testArchivalProcedure() {
     }
   });
 
+  // 3b. Insert child AlertStatusAudit record to verify foreign key and audit archival
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "AlertStatusAudit" ("alertId", "oldStatus", "newStatus", "changedAt") VALUES ($1, 'DISPATCHED', 'COMPLETED', NOW());`,
+    testAlert.id
+  );
+
   // 4. Backdate alert to 35 days ago
   await prisma.$executeRawUnsafe(
     `UPDATE "EmergencyAlert" SET "updatedAt" = NOW() - INTERVAL '35 days' WHERE id = $1;`,
@@ -63,21 +69,24 @@ async function testArchivalProcedure() {
   const alertInOp = await prisma.emergencyAlert.findUnique({ where: { id: testAlert.id } });
   const dispatchInOp = await prisma.dispatchRecord.findUnique({ where: { id: testDispatch.id } });
   const feedbackInOp = await prisma.feedback.findUnique({ where: { id: testFeedback.id } });
+  const auditInOp = await prisma.$queryRawUnsafe(`SELECT * FROM "AlertStatusAudit" WHERE "alertId" = $1;`, testAlert.id);
 
   const archivedAlert = await prisma.$queryRawUnsafe(`SELECT * FROM "EmergencyAlertArchive" WHERE id = $1;`, testAlert.id);
   const archivedDispatch = await prisma.$queryRawUnsafe(`SELECT * FROM "DispatchRecordArchive" WHERE id = $1;`, testDispatch.id);
   const archivedFeedback = await prisma.$queryRawUnsafe(`SELECT * FROM "FeedbackArchive" WHERE id = $1;`, testFeedback.id);
+  const archivedAudit = await prisma.$queryRawUnsafe(`SELECT * FROM "AlertStatusAuditArchive" WHERE "alertId" = $1;`, testAlert.id);
 
-  const passed = !alertInOp && !dispatchInOp && !feedbackInOp && 
-                 archivedAlert.length > 0 && archivedDispatch.length > 0 && archivedFeedback.length > 0;
+  const passed = !alertInOp && !dispatchInOp && !feedbackInOp && (auditInOp.length === 0) &&
+                 archivedAlert.length > 0 && archivedDispatch.length > 0 && archivedFeedback.length > 0 && archivedAudit.length > 0;
 
   // Cleanup
+  await prisma.$executeRawUnsafe(`DELETE FROM "AlertStatusAuditArchive" WHERE "alertId" = $1;`, testAlert.id);
   await prisma.$executeRawUnsafe(`DELETE FROM "FeedbackArchive" WHERE id = $1;`, testFeedback.id);
   await prisma.$executeRawUnsafe(`DELETE FROM "DispatchRecordArchive" WHERE id = $1;`, testDispatch.id);
   await prisma.$executeRawUnsafe(`DELETE FROM "EmergencyAlertArchive" WHERE id = $1;`, testAlert.id);
 
   if (passed) {
-    console.log('✅ PASS: Archive procedure cleanly moved parent and all child rows without data loss or FK errors.');
+    console.log('✅ PASS: Archive procedure cleanly moved parent and all child rows (including AlertStatusAudit) without data loss or FK errors.');
   } else {
     throw new Error('FAIL: Archive procedure failed validation check.');
   }
