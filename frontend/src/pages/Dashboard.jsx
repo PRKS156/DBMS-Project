@@ -1182,8 +1182,8 @@ export default function Dashboard() {
               longitude: pos.coords.longitude,
               requiredSpecialization: emergencyType,
               locationType,
-              hospitalId: parseInt(hospitalId),
-              hospitalName: hospitalsList.find(h => h.id === parseInt(hospitalId))?.name || hospitalName,
+              hospitalId: locationType === 'Building' ? parseInt(hospitalId) : undefined,
+              hospitalName: locationType === 'Building' ? (hospitalsList.find(h => h.id === parseInt(hospitalId))?.name || hospitalName) : undefined,
               floor: locationType === 'Building' ? floor : undefined,
               roomNumber: locationType === 'Building' ? room : undefined,
               landmark: landmark
@@ -1446,69 +1446,77 @@ export default function Dashboard() {
               </div>
 
               <div className="field">
-                <label>Hospital Network / Target Medical Facility</label>
-                <select 
-                  value={hospitalId} 
-                  onChange={e => {
-                    const id = parseInt(e.target.value);
-                    setHospitalId(id);
-                    const found = hospitalsList.find(h => h.id === id);
-                    if (found) setHospitalName(found.name);
-                  }}
-                >
-                  {hospitalsList.map(h => (
-                    <option key={h.id} value={h.id}>
-                      🏥 {h.name} {h.address ? `(${h.address})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field">
                 <label>Where are you located?</label>
                 <select value={locationType} onChange={e => setLocationType(e.target.value)}>
-                  <option value="Outside">Outside / Street / Home (Dispatch Ambulance & Physician)</option>
-                  <option value="Building">Inside Hospital Facility / Ward (Admitted Inpatient Alert)</option>
+                  <option value="Outside">Outside / Street / Home (Outpatient - Auto-route nearest ambulance)</option>
+                  <option value="Building">Inside Hospital Facility / Ward (Admitted Inpatient)</option>
                 </select>
               </div>
 
-              <p className="caption">
-                {locationType === 'Building'
-                  ? `🏥 Inpatient Ward Response: Dispatched within ${hospitalsList.find(h => h.id === parseInt(hospitalId))?.name || hospitalName}. Enter floor and room for on-foot clinical arrival.`
-                  : `🚑 Field Emergency: Dispatching closest emergency team from ${hospitalsList.find(h => h.id === parseInt(hospitalId))?.name || hospitalName} to your live street coordinates.`}
-              </p>
-
               {locationType === 'Building' ? (
-                <div className="split">
+                <>
                   <div className="field">
-                    <label>Floor / Ward</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g., 3rd Floor, West Wing" 
-                      value={floor} 
-                      onChange={e => setFloor(e.target.value)} 
-                    />
+                    <label>Which hospital are you currently admitted in?</label>
+                    <select 
+                      value={hospitalId} 
+                      onChange={e => {
+                        const id = parseInt(e.target.value);
+                        setHospitalId(id);
+                        const found = hospitalsList.find(h => h.id === id);
+                        if (found) setHospitalName(found.name);
+                      }}
+                    >
+                      {hospitalsList.map(h => (
+                        <option key={h.id} value={h.id}>
+                          🏥 {h.name} {h.address ? `(${h.address})` : ''}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="field">
-                    <label>Room / Bed Number</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g., Room 312, Bed B" 
-                      value={room} 
-                      onChange={e => setRoom(e.target.value)} 
-                    />
+
+                  <p className="caption">
+                    🏥 Inpatient Ward Response: Dispatched within {hospitalsList.find(h => h.id === parseInt(hospitalId))?.name || hospitalName}. Enter floor and room for on-foot clinical arrival.
+                  </p>
+
+                  <div className="split">
+                    <div className="field">
+                      <label>Floor / Ward</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g., 3rd Floor, West Wing" 
+                        value={floor} 
+                        onChange={e => setFloor(e.target.value)} 
+                        required
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Room / Bed Number</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g., Room 312, Bed B" 
+                        value={room} 
+                        onChange={e => setRoom(e.target.value)} 
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
+                </>
               ) : (
-                <div className="field">
-                  <label>Street Landmark / Pickup Address</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g., Near VIT Main Gate, Katpadi Road" 
-                    value={landmark} 
-                    onChange={e => setLandmark(e.target.value)} 
-                  />
-                </div>
+                <>
+                  <p className="caption">
+                    🚑 Outpatient Emergency: MedRelay automatically identifies your live GPS coordinates and dispatches the closest available emergency physician and ambulance. You do not need to choose a facility.
+                  </p>
+
+                  <div className="field">
+                    <label>Street Landmark / Pickup Details <span className="hint">Optional</span></label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., Near VIT Main Gate, Katpadi Road" 
+                      value={landmark} 
+                      onChange={e => setLandmark(e.target.value)} 
+                    />
+                  </div>
+                </>
               )}
             </div>
             <button className="btn red" type="button" onClick={handleEmergencySubmit} disabled={loading}>

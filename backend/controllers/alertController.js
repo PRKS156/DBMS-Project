@@ -82,15 +82,27 @@ exports.triggerAlert = async (req, res) => {
             }
         };
 
-        // Resolve target hospital first
+        // Resolve hospital context:
+        // Inpatient ward alerts strictly use the patient's selected facility
+        // Outpatient emergencies automatically locate the nearest facility base
         let targetHospital = null;
-        if (hospitalId) {
+        if (isIndoorWard && hospitalId) {
             targetHospital = await prisma.hospital.findUnique({ where: { id: parseInt(hospitalId) } });
         }
-        if (!targetHospital && hospitalName) {
+        if (!targetHospital && isIndoorWard && hospitalName) {
             targetHospital = await prisma.hospital.findFirst({
                 where: { name: { contains: hospitalName, mode: 'insensitive' } }
             });
+        }
+        if (!targetHospital && !isIndoorWard && lat && lng) {
+            const allHospitals = await prisma.hospital.findMany();
+            if (allHospitals.length > 0) {
+                targetHospital = allHospitals.reduce((prev, curr) => {
+                    const prevDist = getDistance(lat, lng, prev.latitude, prev.longitude);
+                    const currDist = getDistance(lat, lng, curr.latitude, curr.longitude);
+                    return currDist < prevDist ? curr : prev;
+                });
+            }
         }
         if (!targetHospital) {
             targetHospital = await prisma.hospital.findFirst();
@@ -302,7 +314,7 @@ exports.triggerAlert = async (req, res) => {
         if (isIndoorWard) {
             alertDescription = `${requiredSpecialization || 'General'} | Hospital: ${chosenHospitalName}, Floor: ${floor || 'N/A'}, Room: ${roomNumber || 'N/A'}${bedNumber ? `, Bed: ${bedNumber}` : ''} [INPATIENT ON-FOOT]`;
         } else {
-            alertDescription = `${requiredSpecialization || 'General'} | Outdoor SOS (Facility: ${chosenHospitalName}) - Landmark: ${landmark || 'N/A'}`;
+            alertDescription = `${requiredSpecialization || 'General'} | Outdoor SOS (Dispatch Base: ${chosenHospitalName}) - Landmark: ${landmark || 'Live GPS Coordinates'}`;
         }
 
         if (isFallback) {
@@ -398,17 +410,24 @@ exports.triggerAlert = async (req, res) => {
             }
 
             // Save dispatch record with immutable audit snapshots (Critique #10)
+            const dispatchHospitalId = isIndoorWard 
+                ? (targetHospital ? targetHospital.id : null)
+                : ((chosenDoctor && chosenDoctor.hospitalId) || (targetHospital ? targetHospital.id : null));
+            const dispatchHospitalName = isIndoorWard 
+                ? chosenHospitalName
+                : ((chosenDoctor && chosenDoctor.hospital ? chosenDoctor.hospital.name : null) || chosenHospitalName);
+
             const dispatch = await tx.dispatchRecord.create({
                 data: {
                     alertId: newAlert.id,
                     doctorId: chosenDoctor.id,
-                    hospitalId: targetHospital ? targetHospital.id : null,
+                    hospitalId: dispatchHospitalId,
                     vehicleId: vehicle ? vehicle.id : null,
                     doctorNameSnapshot: chosenDoctor.fullName,
                     doctorSpecializationSnapshot: chosenDoctor.specialization,
                     doctorPhoneSnapshot: chosenDoctor.phoneNumber,
                     vehiclePlateSnapshot: vehicle ? vehicle.licensePlate : null,
-                    hospitalNameSnapshot: chosenHospitalName
+                    hospitalNameSnapshot: dispatchHospitalName
                 }
             });
 
