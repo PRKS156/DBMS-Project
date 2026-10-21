@@ -75,7 +75,7 @@ async function main() {
       p.id AS "patientId",
       p."fullName" AS "patientName",
       p."phoneNumber" AS "patientPhone",
-      p."bloodGroup",
+      COALESCE(p."bloodGroup", 'Unknown') AS "bloodGroup",
       p."medicalHistory",
       d.id AS "dispatchId",
       doc.id AS "doctorId",

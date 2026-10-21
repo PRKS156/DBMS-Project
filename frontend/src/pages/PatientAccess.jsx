@@ -9,7 +9,7 @@ export default function PatientAccess() {
   const [name, setName] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('Male');
-  const [bloodGroup, setBloodGroup] = useState('A+');
+  const [bloodGroup, setBloodGroup] = useState('Unknown');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -154,6 +154,7 @@ export default function PatientAccess() {
                <div className="field">
                 <label>Blood group</label>
                 <select value={bloodGroup} onChange={e => setBloodGroup(e.target.value)}>
+                  <option value="Unknown">Unknown / Unrecorded</option>
                   <option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>O+</option><option>O-</option><option>AB+</option><option>AB-</option>
                 </select>
               </div>

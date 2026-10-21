@@ -122,7 +122,7 @@ exports.triggerAlert = async (req, res) => {
                             password: 'guestpassword',
                             role: 'PATIENT',
                             patientProfile: {
-                                create: { fullName: 'Inpatient Bystander', phoneNumber: 'N/A', medicalHistory: 'Inpatient Ward Alert' }
+                                create: { fullName: 'Inpatient Bystander', phoneNumber: 'N/A', medicalHistory: 'Inpatient Ward Alert', bloodGroup: 'Unknown' }
                             }
                         },
                         include: { patientProfile: true }
@@ -287,7 +287,8 @@ exports.triggerAlert = async (req, res) => {
                         create: {
                             fullName: 'Anonymous Bystander',
                             phoneNumber: 'N/A',
-                            medicalHistory: 'Unknown (Guest SOS)'
+                            medicalHistory: 'Unknown (Guest SOS)',
+                            bloodGroup: 'Unknown'
                         }
                     }
                 },
@@ -688,7 +689,7 @@ exports.getDoctorAlerts = async (req, res) => {
                 patientname: d.alert.patient?.fullName || 'Anonymous Patient',
                 age: d.alert.patient?.age || 'N/A',
                 gender: d.alert.patient?.gender || 'N/A',
-                bloodgroup: d.alert.patient?.bloodGroup || 'N/A',
+                bloodgroup: (d.alert.patient?.bloodGroup && d.alert.patient.bloodGroup !== 'null' && d.alert.patient.bloodGroup !== 'N/A') ? d.alert.patient.bloodGroup : 'Unknown',
                 patientphone: d.alert.patient?.phoneNumber || 'N/A',
                 medicalHistory: d.alert.patient?.medicalHistory || 'None recorded'
             };

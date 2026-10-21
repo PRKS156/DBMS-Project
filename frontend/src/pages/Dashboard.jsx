@@ -545,7 +545,7 @@ export default function Dashboard() {
                       </td>
                       <td style={{ padding: '10px 8px' }}>
                         <strong>{item.patientName || 'Anonymous Bystander'}</strong>
-                        <div style={{ fontSize: '11px', color: '#64748b' }}>Blood: {item.bloodGroup || 'N/A'} • {item.patientPhone || 'No phone'}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Blood: {item.bloodGroup || 'Unknown'} • {item.patientPhone || 'No phone'}</div>
                       </td>
                       <td style={{ padding: '10px 8px', maxWidth: '200px', fontSize: '0.82rem', color: '#334155' }}>
                         {item.description}
@@ -705,8 +705,15 @@ export default function Dashboard() {
                         <td style={{ padding: '10px 8px', color: '#475569' }}>{p.email}</td>
                         <td style={{ padding: '10px 8px' }}>{p.age ? `${p.age} yrs` : 'N/A'} • {p.gender || 'Not specified'}</td>
                         <td style={{ padding: '10px 8px' }}>
-                          <span style={{ padding: '3px 8px', borderRadius: '12px', background: '#fee2e2', color: '#991b1b', fontSize: '11px', fontWeight: 'bold' }}>
-                            {p.bloodGroup || 'O+'}
+                          <span style={{
+                            padding: '3px 8px',
+                            borderRadius: '12px',
+                            background: (p.bloodGroup && p.bloodGroup !== 'Unknown') ? '#fee2e2' : '#f1f5f9',
+                            color: (p.bloodGroup && p.bloodGroup !== 'Unknown') ? '#991b1b' : '#64748b',
+                            fontSize: '11px',
+                            fontWeight: 'bold'
+                          }}>
+                            {p.bloodGroup || 'Unknown'}
                           </span>
                         </td>
                         <td style={{ padding: '10px 8px' }}>
@@ -994,7 +1001,7 @@ export default function Dashboard() {
                   return (
                     <div key={alert.alertid} style={{ border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'rgba(255,255,255,0.02)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-                        <strong style={{ fontSize: '1.05rem' }}>{alert.patientname} ({alert.age || '?'}y, {alert.gender || 'N/A'}) - Blood: {alert.bloodgroup || 'N/A'}</strong>
+                        <strong style={{ fontSize: '1.05rem' }}>{alert.patientname} ({alert.age || '?'}y, {alert.gender || 'N/A'}) - Blood: {alert.bloodgroup || 'Unknown'}</strong>
                         <span className="count-pill" style={{
                           backgroundColor: alert.status === 'PENDING' ? '#fef08a' : '#bbf7d0',
                           color: alert.status === 'PENDING' ? '#854d0e' : '#14532d',
