@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [patientActive, setPatientActive] = useState(true);
   const [adminStats, setAdminStats] = useState({ totalDoctors: 0, availableDoctors: 0, busyOrOffDuty: 0, totalPatients: 0 });
   const [doctorsList, setDoctorsList] = useState([]);
   const [patientsList, setPatientsList] = useState([]);
@@ -100,6 +101,16 @@ export default function Dashboard() {
     }
 
     if (role === 'PATIENT') {
+      // Fetch current patient profile active status
+      fetch(`${API_BASE}/api/patients/${localStorage.getItem('userId')}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.profile) {
+            setPatientActive(data.profile.isActive !== false);
+          }
+        })
+        .catch(err => console.warn('Could not load patient status:', err));
+
       // Fetch dynamic hospital network list
       fetch(`${API_BASE}/api/alerts/hospitals`)
         .then(r => r.json())
@@ -408,6 +419,64 @@ export default function Dashboard() {
     }
   };
 
+  const handleTogglePatientActive = async () => {
+    const newStatus = !patientActive;
+    try {
+      const res = await fetch(`${API_BASE}/api/patients/${localStorage.getItem('userId')}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: newStatus })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPatientActive(newStatus);
+        setSuccess(`Profile active status changed: ${newStatus ? 'Active (Monitoring Live)' : 'Standby / Inactive'}.`);
+        setTimeout(() => setSuccess(''), 4000);
+      } else {
+        alert(data.message || 'Failed to update patient active status');
+      }
+    } catch (err) {
+      console.error(err);
+      setPatientActive(newStatus);
+    }
+  };
+
+  const handleToggleDoctorActive = async (doctorId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/doctors/${doctorId}/toggle-active`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDoctorsList(prev => prev.map(d => (d.userId === doctorId || d.id === doctorId) ? { ...d, isActive: data.isActive, isAvailable: data.isAvailable, isOnDuty: data.isOnDuty } : d));
+        fetchAdminStats();
+      } else {
+        alert(data.message || 'Failed to toggle doctor active status.');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleTogglePatientActiveAdmin = async (patientId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/patients/${patientId}/toggle-active`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPatientsList(prev => prev.map(p => (p.userId === patientId || p.id === patientId) ? { ...p, isActive: data.isActive } : p));
+        fetchAdminStats();
+      } else {
+        alert(data.message || 'Failed to toggle patient active status.');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleLogout = () => {
     localStorage.clear();
     navigate('/');
@@ -479,9 +548,9 @@ export default function Dashboard() {
         
         <div className="metrics" style={{ marginTop: '1.5rem' }}>
           <div className="metric"><span>Registered clinicians</span><strong>{adminStats.totalDoctors}</strong></div>
-          <div className="metric ok"><span>Currently available</span><strong>{adminStats.availableDoctors}</strong></div>
-          <div className="metric busy"><span>Engaged or off duty</span><strong>{adminStats.busyOrOffDuty}</strong></div>
-          <div className="metric"><span>Ongoing emergencies</span><strong>{activeEmergenciesList.length}</strong></div>
+          <div className="metric ok"><span>Active Clinicians (On Duty)</span><strong>{adminStats.activeDoctors ?? adminStats.availableDoctors}</strong></div>
+          <div className="metric ok"><span>Active Patients</span><strong>{adminStats.activePatients ?? adminStats.totalPatients}</strong></div>
+          <div className="metric busy"><span>Ongoing emergencies</span><strong>{activeEmergenciesList.length}</strong></div>
         </div>
 
         {/* Tab 1: Dispatcher Operations Console (Critique #7 & #11: ActiveEmergenciesView & Manual Reassignment) */}
@@ -638,8 +707,8 @@ export default function Dashboard() {
                       <th style={{ padding: '10px 8px' }}>Doctor Name</th>
                       <th style={{ padding: '10px 8px' }}>Email</th>
                       <th style={{ padding: '10px 8px' }}>Specialization</th>
-                      <th style={{ padding: '10px 8px' }}>Status</th>
-                      <th style={{ padding: '10px 8px' }}>Actions</th>
+                      <th style={{ padding: '10px 8px' }}>Duty / Active Status</th>
+                      <th style={{ padding: '10px 8px' }}>Options & Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -655,20 +724,36 @@ export default function Dashboard() {
                           </span>
                         </td>
                         <td style={{ padding: '10px 8px' }}>
-                          {d.isAvailable ? (
-                            <span style={{ color: '#16a34a', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              ● On Duty / Available
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{
+                              color: d.isActive ? '#16a34a' : '#dc2626',
+                              fontWeight: 'bold',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '12px'
+                            }}>
+                              {d.isActive ? '● Active' : '○ Inactive'}
                             </span>
-                          ) : (
-                            <span style={{ color: '#dc2626', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              ○ Off Duty / Engaged
+                            <span style={{ fontSize: '11px', color: '#64748b' }}>
+                              {d.isAvailable ? '• On Duty / Available' : '• Off Duty / Engaged'}
                             </span>
-                          )}
+                          </div>
                         </td>
                         <td style={{ padding: '10px 8px' }}>
-                          <button className="btn-sm plain" onClick={() => deleteAdminRecord('doctors', d.userId)}>
-                            Remove
-                          </button>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              className="btn-sm ghost"
+                              style={{ padding: '3px 8px', fontSize: '11px' }}
+                              onClick={() => handleToggleDoctorActive(d.userId)}
+                              title="Toggle Doctor Active or Inactive"
+                            >
+                              {d.isActive ? 'Set Inactive' : 'Set Active'}
+                            </button>
+                            <button className="btn-sm plain" style={{ padding: '3px 8px', fontSize: '11px' }} onClick={() => deleteAdminRecord('doctors', d.userId)}>
+                              Remove
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -695,12 +780,13 @@ export default function Dashboard() {
                       <th style={{ padding: '10px 8px' }}>Contact Email</th>
                       <th style={{ padding: '10px 8px' }}>Demographics</th>
                       <th style={{ padding: '10px 8px' }}>Blood Group</th>
-                      <th style={{ padding: '10px 8px' }}>Privacy Actions</th>
+                      <th style={{ padding: '10px 8px' }}>Active Status</th>
+                      <th style={{ padding: '10px 8px' }}>Options & Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {patientsList.length === 0 ? (
-                      <tr><td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No patient accounts registered.</td></tr>
+                      <tr><td colSpan="6" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No patient accounts registered.</td></tr>
                     ) : patientsList.map(p => {
                       const isUnknown = !p.bloodGroup || p.bloodGroup === 'Unknown' || p.bloodGroup === 'N/A' || p.bloodGroup === 'null' || p.name?.includes('Bystander') || p.name?.includes('Anonymous') || p.name?.includes('Inpatient') || p.email?.includes('guest');
                       const displayBlood = isUnknown ? 'Unknown' : p.bloodGroup;
@@ -724,9 +810,64 @@ export default function Dashboard() {
                             </span>
                           </td>
                           <td style={{ padding: '10px 8px' }}>
-                            <button className="btn-sm plain" onClick={() => deleteAdminRecord('patients', p.userId)}>
-                              GDPR Erasure
-                            </button>
+                            {p.hasActiveAlert ? (
+                              <span style={{
+                                padding: '3px 8px',
+                                borderRadius: '12px',
+                                background: '#fee2e2',
+                                color: '#b91c1c',
+                                fontWeight: 'bold',
+                                fontSize: '11px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}>
+                                🚨 SOS Active ({p.activeAlertStatus || 'En Route'})
+                              </span>
+                            ) : p.isActive ? (
+                              <span style={{
+                                padding: '3px 8px',
+                                borderRadius: '12px',
+                                background: '#dcfce7',
+                                color: '#166534',
+                                fontWeight: 'bold',
+                                fontSize: '11px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}>
+                                ● Active (Ready)
+                              </span>
+                            ) : (
+                              <span style={{
+                                padding: '3px 8px',
+                                borderRadius: '12px',
+                                background: '#f1f5f9',
+                                color: '#64748b',
+                                fontWeight: 'bold',
+                                fontSize: '11px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}>
+                                ○ Inactive (Standby)
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 8px' }}>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                className="btn-sm ghost"
+                                style={{ padding: '3px 8px', fontSize: '11px' }}
+                                onClick={() => handleTogglePatientActiveAdmin(p.userId)}
+                                title="Toggle Patient Active or Inactive"
+                              >
+                                {p.isActive ? 'Set Inactive' : 'Set Active'}
+                              </button>
+                              <button className="btn-sm plain" style={{ padding: '3px 8px', fontSize: '11px' }} onClick={() => deleteAdminRecord('patients', p.userId)}>
+                                GDPR Erasure
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -948,6 +1089,57 @@ export default function Dashboard() {
           <span className="eyebrow">{active ? 'Live for dispatch' : 'Duty settings'}</span>
           <h1>{active ? 'You are currently on duty.' : `Welcome, Dr. ${localStorage.getItem('name') || ''}.`}</h1>
           <p className="sub">{active ? 'Your availability and location are being securely transmitted to the dispatch service.' : 'You are signed in but are not currently receiving emergency dispatches.'}</p>
+        </div>
+
+        {/* Doctor Active Status Indicator & Option */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '14px 18px',
+          borderRadius: '10px',
+          background: active ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+          border: active ? '1px solid #10b981' : '1px solid #ef4444',
+          marginBottom: '1.25rem',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              background: active ? '#10b981' : '#ef4444',
+              boxShadow: active ? '0 0 10px #10b981' : 'none'
+            }}></span>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: '0.95rem', color: active ? '#065f46' : '#991b1b' }}>
+                Doctor Status: {active ? '🟢 ACTIVE (ON DUTY & ELIGIBLE FOR DISPATCH)' : '⚪ INACTIVE (OFF DUTY)'}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                {active
+                  ? 'Your live GPS coordinates are streaming. You are actively receiving emergency assignments.'
+                  : 'You are signed in but offline for dispatch assignments. Click the button to switch to Active.'}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleDutyToggle(!active)}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              fontWeight: '600',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              background: active ? '#ef4444' : '#0f766e',
+              color: '#fff',
+              transition: 'background 0.2s'
+            }}
+          >
+            {active ? 'Conclude Duty (Set Inactive)' : 'Commence Duty (Set Active)'}
+          </button>
         </div>
         
         {/* Mobile Browser Telemetry Advisory */}
@@ -1218,6 +1410,57 @@ export default function Dashboard() {
           <span className="eyebrow">Need Help?</span>
           <h1>Get help right now.</h1>
           <p className="sub">Tell us what's wrong and where you are, and we'll send a doctor immediately.</p>
+        </div>
+
+        {/* Patient Active Status Indicator & Option */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '14px 18px',
+          borderRadius: '10px',
+          background: patientActive ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+          border: patientActive ? '1px solid #10b981' : '1px solid #ef4444',
+          marginBottom: '1.5rem',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              background: patientActive ? '#10b981' : '#ef4444',
+              boxShadow: patientActive ? '0 0 10px #10b981' : 'none'
+            }}></span>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: '0.95rem', color: patientActive ? '#065f46' : '#991b1b' }}>
+                Patient Status: {patientActive ? (activeAlertId ? '🚨 ACTIVE (SOS Emergency in Progress)' : '🟢 ACTIVE (Ready for SOS Dispatch)') : '⚪ STANDBY / INACTIVE'}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                {patientActive
+                  ? (activeAlertId ? 'A clinician and emergency team are currently responding to your location.' : 'Your emergency triage profile and GPS telemetry are armed and active for 1-tap dispatch.')
+                  : 'Your account is currently set to Standby / Inactive. Click below to prime your profile for emergency response.'}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleTogglePatientActive}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              fontWeight: '600',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              background: patientActive ? '#ef4444' : '#0f766e',
+              color: '#fff',
+              transition: 'background 0.2s'
+            }}
+          >
+            {patientActive ? 'Set Inactive (Standby)' : 'Set Active (Emergency Ready)'}
+          </button>
         </div>
 
         {activeAlertId && activeAlertDetails ? (

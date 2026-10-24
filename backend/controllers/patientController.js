@@ -155,16 +155,61 @@ exports.getPatientProfile = async (req, res) => {
     try {
         const profile = await prisma.patientProfile.findFirst({
             where: { OR: [{ id: targetId }, { userId: targetId }] },
-            include: { user: { select: { id: true, email: true, createdAt: true } } }
+            include: { user: { select: { id: true, email: true, isActive: true, createdAt: true } } }
         });
 
         if (!profile) {
             return res.status(404).json({ success: false, message: "Patient profile not found." });
         }
 
-        return res.status(200).json({ success: true, profile });
+        return res.status(200).json({
+            success: true,
+            profile: {
+                ...profile,
+                isActive: profile.user?.isActive !== false
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: "Failed to fetch patient profile.", debug: error.message });
+    }
+};
+
+/**
+ * Update patient active/standby status.
+ */
+exports.setStatus = async (req, res) => {
+    const { id } = req.params;
+    const targetId = parseInt(id);
+    const { status, isActive } = req.body;
+
+    if (isNaN(targetId)) {
+        return res.status(400).json({ success: false, message: "Invalid patient ID." });
+    }
+
+    const newActive = typeof isActive === 'boolean' ? isActive : (typeof status === 'boolean' ? status : true);
+
+    try {
+        const profile = await prisma.patientProfile.findFirst({
+            where: { OR: [{ id: targetId }, { userId: targetId }] }
+        });
+
+        if (!profile) {
+            return res.status(404).json({ success: false, message: "Patient profile not found." });
+        }
+
+        await prisma.user.update({
+            where: { id: profile.userId },
+            data: { isActive: newActive }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: `Patient active status updated to ${newActive ? 'Active (Monitoring Live)' : 'Standby / Inactive'}.`,
+            isActive: newActive
+        });
+    } catch (error) {
+        console.error("❌ Patient Status Update Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to update active status.", debug: error.message });
     }
 };
 

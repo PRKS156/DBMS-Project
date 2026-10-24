@@ -11,4 +11,8 @@ router.get('/analytics', authenticateToken, requireRole('ADMIN', 'DISPATCHER'), 
 router.delete('/doctors/:id', authenticateToken, requireRole('ADMIN'), adminController.deleteDoctor);
 router.delete('/patients/:id', authenticateToken, requireRole('ADMIN'), adminController.deletePatient);
 
+// Active status toggle operations for clinicians and patients
+router.patch('/doctors/:id/toggle-active', authenticateToken, requireRole('ADMIN', 'DISPATCHER'), adminController.toggleDoctorActive);
+router.patch('/patients/:id/toggle-active', authenticateToken, requireRole('ADMIN', 'DISPATCHER'), adminController.togglePatientActive);
+
 module.exports = router;

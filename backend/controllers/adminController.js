@@ -4,7 +4,9 @@ exports.getAllData = async (req, res) => {
     try {
         const totalDoctors = await prisma.doctorProfile.count();
         const availableDoctors = await prisma.doctorProfile.count({ where: { isAvailable: true } });
+        const activeDoctors = await prisma.doctorProfile.count({ where: { isActive: true, isOnDuty: true } });
         const totalPatients = await prisma.patientProfile.count();
+        const activePatients = await prisma.user.count({ where: { role: 'PATIENT', isActive: true } });
 
         const doctors = await prisma.doctorProfile.findMany({
             include: { user: true },
@@ -12,7 +14,13 @@ exports.getAllData = async (req, res) => {
         });
         
         const patients = await prisma.patientProfile.findMany({
-            include: { user: true },
+            include: {
+                user: true,
+                alerts: {
+                    where: { status: { in: ['PENDING', 'DISPATCHED', 'TRANSPORTING'] } },
+                    select: { id: true, status: true }
+                }
+            },
             orderBy: { id: 'asc' }
         });
 
@@ -21,8 +29,10 @@ exports.getAllData = async (req, res) => {
             stats: {
                 totalDoctors,
                 availableDoctors,
+                activeDoctors,
                 busyOrOffDuty: totalDoctors - availableDoctors,
-                totalPatients
+                totalPatients,
+                activePatients
             },
             doctors: doctors.map(d => ({
                 id: d.id,
@@ -31,7 +41,9 @@ exports.getAllData = async (req, res) => {
                 name: d.fullName,
                 phone: d.phoneNumber,
                 specialization: d.specialization,
-                isAvailable: d.isAvailable
+                isAvailable: d.isAvailable,
+                isOnDuty: d.isOnDuty,
+                isActive: Boolean(d.isActive && d.user?.isActive !== false)
             })),
             patients: patients.map(p => ({
                 id: p.id,
@@ -41,7 +53,10 @@ exports.getAllData = async (req, res) => {
                 age: p.age,
                 gender: p.gender,
                 bloodGroup: (p.fullName?.includes('Bystander') || p.fullName?.includes('Anonymous') || p.fullName?.includes('Inpatient') || p.user?.email?.includes('guest') || !p.bloodGroup || p.bloodGroup === 'null' || p.bloodGroup === 'N/A') ? 'Unknown' : p.bloodGroup,
-                phone: p.phoneNumber
+                phone: p.phoneNumber,
+                isActive: Boolean(p.user?.isActive !== false),
+                hasActiveAlert: Boolean(p.alerts && p.alerts.length > 0),
+                activeAlertStatus: (p.alerts && p.alerts.length > 0) ? p.alerts[0].status : null
             }))
         });
     } catch (error) {
@@ -291,3 +306,91 @@ exports.getAnalytics = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to fetch analytics.", error: error.message });
     }
 };
+
+/**
+ * Toggle Doctor Active / Duty Status from Admin or Dispatch console.
+ */
+exports.toggleDoctorActive = async (req, res) => {
+    const { id } = req.params;
+    const targetId = parseInt(id);
+    if (isNaN(targetId)) return res.status(400).json({ success: false, message: "Invalid doctor ID." });
+
+    try {
+        const docProfile = await prisma.doctorProfile.findFirst({
+            where: { OR: [{ userId: targetId }, { id: targetId }] },
+            include: { user: true }
+        });
+        if (!docProfile) return res.status(404).json({ success: false, message: "Doctor profile not found." });
+
+        const currentlyActive = Boolean(docProfile.isActive && docProfile.user?.isActive !== false);
+        const newActive = !currentlyActive;
+
+        await prisma.doctorProfile.update({
+            where: { id: docProfile.id },
+            data: {
+                isActive: newActive,
+                isOnDuty: newActive,
+                isAvailable: newActive && !docProfile.isBusy
+            }
+        });
+
+        await prisma.user.update({
+            where: { id: docProfile.userId },
+            data: { isActive: newActive }
+        });
+
+        if (req.app.locals.io) {
+            req.app.locals.io.emit('doctorStatusUpdate', {
+                doctorId: docProfile.userId,
+                isOnDuty: newActive,
+                isBusy: docProfile.isBusy,
+                isAvailable: newActive && !docProfile.isBusy
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Dr. ${docProfile.fullName} status updated to ${newActive ? 'Active (On Duty)' : 'Inactive (Off Duty)'}.`,
+            isActive: newActive,
+            isOnDuty: newActive,
+            isAvailable: newActive && !docProfile.isBusy
+        });
+    } catch (error) {
+        console.error("❌ Doctor Active Toggle Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to update doctor active status.", debug: error.message });
+    }
+};
+
+/**
+ * Toggle Patient Active Status from Admin console.
+ */
+exports.togglePatientActive = async (req, res) => {
+    const { id } = req.params;
+    const targetId = parseInt(id);
+    if (isNaN(targetId)) return res.status(400).json({ success: false, message: "Invalid patient ID." });
+
+    try {
+        const patProfile = await prisma.patientProfile.findFirst({
+            where: { OR: [{ userId: targetId }, { id: targetId }] },
+            include: { user: true }
+        });
+        if (!patProfile) return res.status(404).json({ success: false, message: "Patient profile not found." });
+
+        const currentlyActive = Boolean(patProfile.user?.isActive !== false);
+        const newActive = !currentlyActive;
+
+        await prisma.user.update({
+            where: { id: patProfile.userId },
+            data: { isActive: newActive }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: `Patient ${patProfile.fullName} marked as ${newActive ? 'Active (Ready)' : 'Inactive (Standby)'}.`,
+            isActive: newActive
+        });
+    } catch (error) {
+        console.error("❌ Patient Active Toggle Failure:", error.message);
+        return res.status(500).json({ success: false, message: "Failed to update patient active status.", debug: error.message });
+    }
+};

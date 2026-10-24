@@ -199,10 +199,11 @@ async function getRealRoadRoute(originLat, originLng, destLat, destLng) {
         }
     }
 
-    // 2. OpenRouteService API (if OPENROUTESERVICE_API_KEY configured)
-    if (process.env.OPENROUTESERVICE_API_KEY) {
+    // 2. OpenRouteService / OpenStreetMap API (if configured)
+    const osmApiKey = process.env.openstreetapi || process.env.OPENSTREETAPI || process.env.OPENROUTESERVICE_API_KEY;
+    if (osmApiKey && osmApiKey.trim() !== '' && osmApiKey !== 'insert api here') {
         try {
-            const orsUrl = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${process.env.OPENROUTESERVICE_API_KEY}&start=${originLng},${originLat}&end=${destLng},${destLat}`;
+            const orsUrl = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${osmApiKey.trim()}&start=${originLng},${originLat}&end=${destLng},${destLat}`;
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 6000);
             const res = await fetch(orsUrl, { signal: controller.signal });

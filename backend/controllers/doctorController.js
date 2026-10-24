@@ -102,8 +102,14 @@ exports.setStatus = async (req, res) => {
             where: { id: docProfile.id },
             data: {
                 isOnDuty: status,
+                isActive: status,
                 isAvailable: computedAvailable
             }
+        });
+
+        await prisma.user.update({
+            where: { id: docProfile.userId },
+            data: { isActive: status }
         });
 
         if (req.app.locals.io) {
