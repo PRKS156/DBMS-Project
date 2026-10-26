@@ -6,7 +6,9 @@ const ollamaService = require('../utils/ollamaService');
  */
 exports.getStatus = async (req, res) => {
     try {
-        const status = await ollamaService.checkOllamaStatus();
+        const apiKey = req.query.apiKey || req.headers['x-ai-key'];
+        const provider = req.query.provider || req.headers['x-ai-provider'];
+        const status = await ollamaService.checkOllamaStatus(apiKey, provider);
         return res.status(200).json({
             success: true,
             status
@@ -14,7 +16,7 @@ exports.getStatus = async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: 'Failed to query Ollama engine status',
+            message: 'Failed to query AI engine status',
             error: error.message
         });
     }
@@ -25,7 +27,9 @@ exports.getStatus = async (req, res) => {
  */
 exports.triageSymptoms = async (req, res) => {
     try {
-        const { symptoms, patientId, context } = req.body;
+        const { symptoms, patientId, context, apiKey, provider } = req.body;
+        const key = apiKey || req.headers['x-ai-key'];
+        const prov = provider || req.headers['x-ai-provider'];
 
         if (!symptoms || typeof symptoms !== 'string' || symptoms.trim().length === 0) {
             return res.status(400).json({
@@ -58,7 +62,9 @@ exports.triageSymptoms = async (req, res) => {
 
         const triageResult = await ollamaService.triageSymptoms({
             symptoms: symptoms.trim(),
-            patientContext
+            patientContext,
+            apiKey: key,
+            provider: prov
         });
 
         return res.status(200).json({
@@ -81,6 +87,8 @@ exports.triageSymptoms = async (req, res) => {
 exports.getDoctorBriefing = async (req, res) => {
     try {
         const alertId = parseInt(req.params.alertId || req.body.alertId);
+        const apiKey = req.body.apiKey || req.query.apiKey || req.headers['x-ai-key'];
+        const provider = req.body.provider || req.query.provider || req.headers['x-ai-provider'];
 
         if (!alertId || isNaN(alertId)) {
             return res.status(400).json({
@@ -113,7 +121,9 @@ exports.getDoctorBriefing = async (req, res) => {
         const briefing = await ollamaService.generateDoctorBriefing({
             alert,
             patientProfile: alert.patient,
-            dispatchRecord: alert.dispatchRecord
+            dispatchRecord: alert.dispatchRecord,
+            apiKey,
+            provider
         });
 
         return res.status(200).json({
@@ -136,7 +146,9 @@ exports.getDoctorBriefing = async (req, res) => {
  */
 exports.chat = async (req, res) => {
     try {
-        const { messages, role, context } = req.body;
+        const { messages, role, context, apiKey, provider } = req.body;
+        const key = apiKey || req.headers['x-ai-key'];
+        const prov = provider || req.headers['x-ai-provider'];
 
         if (!Array.isArray(messages) || messages.length === 0) {
             return res.status(400).json({
@@ -148,7 +160,9 @@ exports.chat = async (req, res) => {
         const response = await ollamaService.chatAssistant({
             messages,
             userRole: role || req.user?.role || 'PATIENT',
-            context: context || {}
+            context: context || {},
+            apiKey: key,
+            provider: prov
         });
 
         return res.status(200).json({
