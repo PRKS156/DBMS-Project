@@ -12,20 +12,19 @@ function getModel() {
 }
 
 /**
- * Check active AI provider status (Gemini, Groq, OpenAI, or local Ollama)
+ * Check active AI provider status (Groq, OpenAI, or local Ollama)
  */
 async function checkOllamaStatus(customKey = null, customProvider = null) {
-    const geminiKey = customKey && customProvider === 'gemini' ? customKey : process.env.GEMINI_API_KEY;
-    const groqKey = customKey && customProvider === 'groq' ? customKey : process.env.GROQ_API_KEY;
+    const groqKey = customKey && (customProvider === 'groq' || !customProvider) ? customKey : process.env.GROQ_API_KEY;
     const openaiKey = customKey && customProvider === 'openai' ? customKey : process.env.OPENAI_API_KEY;
 
-    if (geminiKey) {
+    if (groqKey) {
         return {
             online: true,
-            provider: 'gemini',
-            activeModel: 'gemini-1.5-flash',
-            name: 'Google Gemini 1.5 Flash (Cloud LLM)',
-            latencyMs: 150
+            provider: 'groq',
+            activeModel: 'llama-3.3-70b-versatile',
+            name: 'Groq Llama 3.3 Versatile (Cloud Engine)',
+            latencyMs: 120
         };
     }
 
@@ -115,43 +114,17 @@ function normalizeUrgency(urgency) {
 }
 
 /* ─── Cloud LLM REST Callers ─── */
-async function callGemini({ prompt, systemPrompt, formatJson = false, apiKey }) {
-    const key = apiKey || process.env.GEMINI_API_KEY;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
-    const fullText = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-    const body = {
-        contents: [{ role: 'user', parts: [{ text: fullText }] }],
-        generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 1024,
-            ...(formatJson ? { responseMimeType: 'application/json' } : {})
-        }
-    };
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal
-    });
-    clearTimeout(timeout);
-    if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Gemini API error ${res.status}: ${errText.slice(0, 150)}`);
-    }
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-}
-
-async function callGroq({ messages, systemPrompt, formatJson = false, apiKey }) {
+async function callGroq({ messages, prompt, systemPrompt, formatJson = false, apiKey }) {
     const key = apiKey || process.env.GROQ_API_KEY;
     const url = 'https://api.groq.com/openai/v1/chat/completions';
+    const userMessages = Array.isArray(messages) && messages.length > 0
+        ? messages
+        : (prompt ? [{ role: 'user', content: prompt }] : [{ role: 'user', content: '' }]);
     const payload = {
         model: 'llama-3.3-70b-versatile',
         messages: [
             ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-            ...messages
+            ...userMessages
         ],
         temperature: 0.2,
         ...(formatJson ? { response_format: { type: 'json_object' } } : {})
@@ -243,34 +216,14 @@ Acute Emergency Symptoms:
 
 Provide structured JSON triage assessment:`;
 
-    const effectiveGeminiKey = (apiKey && provider === 'gemini') ? apiKey : process.env.GEMINI_API_KEY;
-    const effectiveGroqKey = (apiKey && provider === 'groq') ? apiKey : process.env.GROQ_API_KEY;
+    const effectiveGroqKey = (apiKey && (provider === 'groq' || !provider)) ? apiKey : process.env.GROQ_API_KEY;
     const effectiveOpenAIKey = (apiKey && provider === 'openai') ? apiKey : process.env.OPENAI_API_KEY;
 
-    // 1. Try Gemini if configured
-    if (effectiveGeminiKey) {
-        try {
-            const raw = await callGemini({ prompt: userPrompt, systemPrompt, formatJson: true, apiKey: effectiveGeminiKey });
-            const parsed = JSON.parse(raw);
-            return {
-                urgencyLevel: normalizeUrgency(parsed.urgencyLevel),
-                recommendedSpecialization: normalizeSpecialization(parsed.recommendedSpecialization),
-                triageSummary: parsed.triageSummary || 'Emergency triage completed.',
-                firstAidInstructions: Array.isArray(parsed.firstAidInstructions) ? parsed.firstAidInstructions : [],
-                redFlags: Array.isArray(parsed.redFlags) ? parsed.redFlags : [],
-                engine: 'gemini',
-                model: 'gemini-1.5-flash'
-            };
-        } catch (e) {
-            console.warn('Gemini triage failed, falling back:', e.message);
-        }
-    }
-
-    // 2. Try Groq if configured
+    // 1. Try Groq (Primary High-Speed Cloud LLM)
     if (effectiveGroqKey) {
         try {
             const raw = await callGroq({
-                messages: [{ role: 'user', content: userPrompt }],
+                prompt: userPrompt,
                 systemPrompt,
                 formatJson: true,
                 apiKey: effectiveGroqKey
@@ -443,10 +396,10 @@ Output strictly JSON matching schema:
 - Emergency Telemetry: ${incidentDescription}
 - Location: ${locationCoords}`;
 
-    const effectiveGeminiKey = (apiKey && provider === 'gemini') ? apiKey : process.env.GEMINI_API_KEY;
-    if (effectiveGeminiKey) {
+    const effectiveGroqKey = (apiKey && (provider === 'groq' || !provider)) ? apiKey : process.env.GROQ_API_KEY;
+    if (effectiveGroqKey) {
         try {
-            const raw = await callGemini({ prompt: userPrompt, systemPrompt, formatJson: true, apiKey: effectiveGeminiKey });
+            const raw = await callGroq({ prompt: userPrompt, systemPrompt, formatJson: true, apiKey: effectiveGroqKey });
             const parsed = JSON.parse(raw);
             return {
                 success: true,
@@ -455,10 +408,12 @@ Output strictly JSON matching schema:
                 immediateAssessmentSteps: Array.isArray(parsed.immediateAssessmentSteps) ? parsed.immediateAssessmentSteps : [],
                 recommendedMedications: Array.isArray(parsed.recommendedMedications) ? parsed.recommendedMedications : [],
                 handoverNote: parsed.handoverNote || '',
-                engine: 'gemini',
-                model: 'gemini-1.5-flash'
+                engine: 'groq',
+                model: 'llama-3.3-70b-versatile'
             };
-        } catch (e) {}
+        } catch (e) {
+            console.warn('Groq briefing generation failed, using clinical fallback:', e.message);
+        }
     }
 
     // Rule-based synthesis fallback
@@ -490,8 +445,7 @@ Output strictly JSON matching schema:
  * Conversational Website Guide & Emergency Clinical Copilot
  */
 async function chatAssistant({ messages, message, userRole = 'PATIENT', context = {}, apiKey = null, provider = null }) {
-    const effectiveGeminiKey = (apiKey && provider === 'gemini') ? apiKey : process.env.GEMINI_API_KEY;
-    const effectiveGroqKey = (apiKey && provider === 'groq') ? apiKey : process.env.GROQ_API_KEY;
+    const effectiveGroqKey = (apiKey && (provider === 'groq' || !provider)) ? apiKey : process.env.GROQ_API_KEY;
     const effectiveOpenAIKey = (apiKey && provider === 'openai') ? apiKey : process.env.OPENAI_API_KEY;
 
     const normalizedMessages = Array.isArray(messages) && messages.length > 0 
@@ -538,20 +492,7 @@ INSTRUCTIONS:
 2. When asked about medical emergencies, provide immediate life-saving first-aid steps (e.g., CPR rhythm, direct pressure on bleeding, stroke FAST protocol) and advise calling 112.
 3. Keep answers concise, highly actionable, and formatted in clean markdown bullet points.`;
 
-    // 1. Try Gemini
-    if (effectiveGeminiKey) {
-        try {
-            const reply = await callGemini({ prompt: lastMsg, systemPrompt, apiKey: effectiveGeminiKey });
-            if (reply && reply.trim().length > 0) {
-                return { success: true, message: reply.trim(), engine: 'gemini', model: 'gemini-1.5-flash' };
-            }
-        } catch (err) {
-
-            console.warn('Gemini chat failed, falling back:', err.message);
-        }
-    }
-
-    // 2. Try Groq
+    // 1. Try Groq (Primary High-Speed Cloud LLM)
     if (effectiveGroqKey) {
         try {
             const reply = await callGroq({ messages: normalizedMessages, systemPrompt, apiKey: effectiveGroqKey });

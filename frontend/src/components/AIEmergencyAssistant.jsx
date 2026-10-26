@@ -17,7 +17,7 @@ export default function AIEmergencyAssistant({ userRole = 'PATIENT', alertContex
   const [isOpen, setIsOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState(() => localStorage.getItem('medrelay_ai_api_key') || '');
-  const [providerInput, setProviderInput] = useState(() => localStorage.getItem('medrelay_ai_provider') || 'gemini');
+  const [providerInput, setProviderInput] = useState(() => localStorage.getItem('medrelay_ai_provider') || 'groq');
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [messages, setMessages] = useState([
@@ -28,7 +28,7 @@ export default function AIEmergencyAssistant({ userRole = 'PATIENT', alertContex
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [aiStatus, setAiStatus] = useState({ online: true, provider: 'auto', model: 'Multi-Engine', latency: null });
+  const [aiStatus, setAiStatus] = useState({ online: true, provider: 'groq', model: 'Groq Llama 3.3', latency: null });
   const messagesEndRef = useRef(null);
 
   // Poll status on mount and update
@@ -36,14 +36,14 @@ export default function AIEmergencyAssistant({ userRole = 'PATIENT', alertContex
     let isMounted = true;
     const fetchStatus = async () => {
       const customKey = localStorage.getItem('medrelay_ai_api_key') || '';
-      const customProv = localStorage.getItem('medrelay_ai_provider') || 'gemini';
+      const customProv = localStorage.getItem('medrelay_ai_provider') || 'groq';
 
       if (customKey) {
         if (isMounted) {
           setAiStatus({
             online: true,
             provider: customProv,
-            model: customProv === 'gemini' ? 'Gemini 1.5 Flash' : (customProv === 'groq' ? 'Llama 3.3 (Groq)' : 'Custom AI'),
+            model: customProv === 'groq' ? 'Groq Llama 3.3' : 'Custom AI',
             latency: 120
           });
         }
@@ -108,8 +108,8 @@ export default function AIEmergencyAssistant({ userRole = 'PATIENT', alertContex
     if (!queryText) setInput('');
     setLoading(true);
 
-    const activeKey = localStorage.getItem('medrelay_ai_api_key') || import.meta.env?.VITE_GEMINI_API_KEY || '';
-    const activeProv = localStorage.getItem('medrelay_ai_provider') || 'gemini';
+    const activeKey = localStorage.getItem('medrelay_ai_api_key') || import.meta.env?.VITE_GROQ_API_KEY || '';
+    const activeProv = localStorage.getItem('medrelay_ai_provider') || 'groq';
 
     // 1. Try Backend API
     try {
@@ -137,29 +137,37 @@ export default function AIEmergencyAssistant({ userRole = 'PATIENT', alertContex
       // Backend is offline or returning non-JSON (e.g. Render sleeping); proceed to client direct API / knowledge engine
     }
 
-    // 2. Direct client call to Gemini if custom API key is present
-    if (activeKey && activeProv === 'gemini') {
+    // 2. Direct client call to Groq Cloud API if API key is present
+    if (activeKey) {
       try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${activeKey}`;
+        const groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
         const sysPrompt = "You are MedRelay AI, an emergency medical copilot and website guide. Give structured, helpful markdown answers with first-aid steps or website instructions.";
-        const gRes = await fetch(geminiUrl, {
+        const gRes = await fetch(groqUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${activeKey}`
+          },
           body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: `${sysPrompt}\n\nUser Question: ${textToSend}` }] }]
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+              { role: 'system', content: sysPrompt },
+              ...newMessages.slice(-6).map(m => ({ role: m.role, content: m.content }))
+            ],
+            temperature: 0.2
           })
         });
         if (gRes.ok) {
           const gData = await gRes.json();
-          const replyText = gData.candidates?.[0]?.content?.parts?.[0]?.text;
+          const replyText = gData.choices?.[0]?.message?.content;
           if (replyText) {
-            setMessages([...newMessages, { role: 'assistant', content: replyText.trim(), engine: 'gemini_direct' }]);
+            setMessages([...newMessages, { role: 'assistant', content: replyText.trim(), engine: 'groq' }]);
             setLoading(false);
             return;
           }
         }
       } catch (gErr) {
-        console.warn('Direct Gemini call failed:', gErr);
+        console.warn('Direct Groq call failed:', gErr);
       }
     }
 
@@ -338,14 +346,13 @@ export default function AIEmergencyAssistant({ userRole = 'PATIENT', alertContex
                     fontSize: '0.78rem'
                   }}
                 >
-                  <option value="gemini">Google Gemini (Free & Fast)</option>
-                  <option value="groq">Groq (Llama 3.3 Free)</option>
+                  <option value="groq">Groq Cloud (Llama 3.3 Free & Fast)</option>
                   <option value="openai">OpenAI (GPT-4o-mini)</option>
                 </select>
 
                 <input
                   type="password"
-                  placeholder="Paste API Key..."
+                  placeholder="Paste Groq API Key (gsk_...)"
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
                   style={{
@@ -362,12 +369,12 @@ export default function AIEmergencyAssistant({ userRole = 'PATIENT', alertContex
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
                 <a
-                  href="https://aistudio.google.com/app/apikey"
+                  href="https://console.groq.com/keys"
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ fontSize: '0.74rem', color: '#38bdf8', textDecoration: 'none' }}
                 >
-                  Get free Google Gemini API Key ↗
+                  Get free Groq API Key (instant) ↗
                 </a>
 
                 <div style={{ display: 'flex', gap: '6px' }}>
@@ -482,9 +489,9 @@ export default function AIEmergencyAssistant({ userRole = 'PATIENT', alertContex
                   {isAssistant && m.engine && (
                     <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginTop: '6px', textAlign: 'right' }}>
                       ⚡ via {
-                        m.engine === 'gemini' || m.engine === 'gemini_direct' ? 'Google Gemini 1.5 Flash' :
-                        m.engine === 'groq' ? 'Groq Llama 3.3' :
+                        m.engine === 'groq' ? 'Groq Llama 3.3 (Cloud)' :
                         m.engine === 'ollama' ? 'Local Ollama (phi3)' :
+                        m.engine === 'openai' ? 'OpenAI GPT-4o-mini' :
                         'MedRelay Knowledge Engine'
                       }
                     </div>
