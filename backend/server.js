@@ -27,6 +27,10 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/patients', patientRoutes);
 
+const aiRoutes = require('./routes/aiRoutes');
+app.use('/api/ai', aiRoutes);
+
+
 // Catch-all health check route pathway for the Render deployment environment verification
 app.get('/', (req, res) => {
     res.status(200).json({ status: "healthy", message: "Emergency Core Server Engine is awake." });
@@ -328,6 +332,15 @@ setInterval(() => {
 // Make io accessible in controllers
 app.locals.io = io;
 
-server.listen(PORT, '0.0.0.0', () => {
+const { checkOllamaStatus } = require('./utils/ollamaService');
+
+server.listen(PORT, '0.0.0.0', async () => {
     console.log(`🚀 Emergency API Server is actively running on port ${PORT}`);
+    const ollama = await checkOllamaStatus();
+    if (ollama.online) {
+        console.log(`🧠 Local Ollama AI Engine connected (${ollama.baseUrl}, model: ${ollama.activeModel}, latency: ${ollama.latencyMs}ms)`);
+    } else {
+        console.warn(`⚠️ Ollama offline or unreachable at ${ollama.baseUrl} (${ollama.error}). Rule-based clinical fallback active.`);
+    }
 });
+

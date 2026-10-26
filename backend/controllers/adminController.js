@@ -384,6 +384,13 @@ exports.togglePatientActive = async (req, res) => {
             data: { isActive: newActive }
         });
 
+        if (req.app.locals.io) {
+            req.app.locals.io.emit('patientStatusUpdate', {
+                userId: patProfile.userId,
+                isActive: newActive
+            });
+        }
+
         return res.status(200).json({
             success: true,
             message: `Patient ${patProfile.fullName} marked as ${newActive ? 'Active (Ready)' : 'Inactive (Standby)'}.`,

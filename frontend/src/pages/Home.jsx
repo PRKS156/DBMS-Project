@@ -1,11 +1,17 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { API_BASE } from '../config/api';
+import AIEmergencyAssistant from '../components/AIEmergencyAssistant';
+import AISymptomTriage from '../components/AISymptomTriage';
 
 export default function Home() {
   const navigate = useNavigate();
   const [loadingSOS, setLoadingSOS] = useState(false);
   const [sosStatus, setSosStatus] = useState(null);
+  const [aiTriageSpec, setAiTriageSpec] = useState('Unsure / General');
+  const [aiTriageNotes, setAiTriageNotes] = useState('');
+  const [showTriageBox, setShowTriageBox] = useState(false);
+
 
   const handleGuestSOS = () => {
     setLoadingSOS(true);
@@ -24,10 +30,11 @@ export default function Home() {
           body: JSON.stringify({
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
-            requiredSpecialization: 'Unsure / General',
+            requiredSpecialization: aiTriageSpec || 'Unsure / General',
             locationType: 'Outside',
-            landmark: 'Unknown Bystander SOS'
+            landmark: aiTriageNotes ? `Bystander SOS | ${aiTriageNotes}` : 'Unknown Bystander SOS'
           })
+
         });
         const data = await res.json();
         if (res.ok && data.success) {
@@ -50,8 +57,9 @@ export default function Home() {
            setSosStatus({ error: data.message || 'Failed to dispatch.' });
         }
       } catch (err) {
-         setSosStatus({ error: 'Network error. Call 911 immediately.' });
+         setSosStatus({ error: 'Network error. Call 112 immediately.' });
       } finally {
+
          setLoadingSOS(false);
       }
     }, () => {
@@ -141,14 +149,56 @@ export default function Home() {
             )}
           </div>
         ) : (
-          <button 
-            className="btn red" 
-            style={{ width: '100%', padding: '15px', fontSize: '18px', fontWeight: 'bold' }} 
-            onClick={handleGuestSOS} 
-            disabled={loadingSOS}
-          >
-            {loadingSOS ? 'Locating...' : '🚨 ONE-TAP GUEST SOS'}
-          </button>
+          <div>
+            <div style={{ marginBottom: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setShowTriageBox(!showTriageBox)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#0f766e',
+                  fontSize: '0.88rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>✨</span> {showTriageBox ? 'Hide AI Symptom Triage' : 'Optional: Describe symptoms for Ollama AI Triage'}
+              </button>
+            </div>
+
+            {showTriageBox && (
+              <div style={{ textAlign: 'left', marginBottom: '14px' }}>
+                <AISymptomTriage
+                  compact={true}
+                  onApplyRecommendation={({ specialization, symptoms, summary }) => {
+                    setAiTriageSpec(specialization);
+                    setAiTriageNotes(symptoms ? `Symptoms: ${symptoms}` : summary);
+                    setShowTriageBox(false);
+                  }}
+                />
+              </div>
+            )}
+
+            {aiTriageSpec && aiTriageSpec !== 'Unsure / General' && (
+              <div style={{ marginBottom: '10px', fontSize: '0.85rem', color: '#166534', background: '#dcfce7', padding: '6px 12px', borderRadius: '6px', fontWeight: 'bold' }}>
+                🎯 AI Triage Matched: Priority {aiTriageSpec} Specialist
+              </div>
+            )}
+
+            <button 
+              className="btn red" 
+              style={{ width: '100%', padding: '15px', fontSize: '18px', fontWeight: 'bold' }} 
+              onClick={handleGuestSOS} 
+              disabled={loadingSOS}
+            >
+              {loadingSOS ? 'Locating...' : (aiTriageSpec && aiTriageSpec !== 'Unsure / General' ? `🚨 1-TAP SOS (${aiTriageSpec.toUpperCase()})` : '🚨 ONE-TAP GUEST SOS')}
+            </button>
+          </div>
         )}
         
         {sosStatus && sosStatus.error && (
@@ -198,6 +248,9 @@ export default function Home() {
         <span className="link" style={{ cursor: 'default' }}>Access is logged for clinical governance.</span>
         <Link to="/admin" className="link admin">Administrative portal</Link>
       </div>
+
+      {/* Ollama Local AI Emergency Copilot */}
+      <AIEmergencyAssistant userRole="PATIENT" />
     </section>
   );
 }

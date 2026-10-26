@@ -148,15 +148,20 @@ exports.getPatientProfile = async (req, res) => {
     const { id } = req.params;
     const targetId = parseInt(id);
 
-    if (isNaN(targetId)) {
-        return res.status(400).json({ success: false, message: "Invalid patient ID." });
-    }
-
     try {
-        const profile = await prisma.patientProfile.findFirst({
-            where: { OR: [{ id: targetId }, { userId: targetId }] },
-            include: { user: { select: { id: true, email: true, isActive: true, createdAt: true } } }
-        });
+        let profile = null;
+        if (!isNaN(targetId)) {
+            profile = await prisma.patientProfile.findFirst({
+                where: { OR: [{ id: targetId }, { userId: targetId }] },
+                include: { user: { select: { id: true, email: true, isActive: true, createdAt: true } } }
+            });
+        }
+        if (!profile && typeof id === 'string') {
+            profile = await prisma.patientProfile.findFirst({
+                where: { user: { email: id.trim().toLowerCase() } },
+                include: { user: { select: { id: true, email: true, isActive: true, createdAt: true } } }
+            });
+        }
 
         if (!profile) {
             return res.status(404).json({ success: false, message: "Patient profile not found." });
@@ -182,25 +187,36 @@ exports.setStatus = async (req, res) => {
     const targetId = parseInt(id);
     const { status, isActive } = req.body;
 
-    if (isNaN(targetId)) {
-        return res.status(400).json({ success: false, message: "Invalid patient ID." });
-    }
-
     const newActive = typeof isActive === 'boolean' ? isActive : (typeof status === 'boolean' ? status : true);
 
     try {
-        const profile = await prisma.patientProfile.findFirst({
-            where: { OR: [{ id: targetId }, { userId: targetId }] }
-        });
-
-        if (!profile) {
-            return res.status(404).json({ success: false, message: "Patient profile not found." });
+        let user = null;
+        if (!isNaN(targetId)) {
+            user = await prisma.user.findFirst({
+                where: { OR: [{ id: targetId }, { patientProfile: { id: targetId } }] }
+            });
+        }
+        if (!user && typeof id === 'string') {
+            user = await prisma.user.findUnique({
+                where: { email: id.trim().toLowerCase() }
+            });
         }
 
-        await prisma.user.update({
-            where: { id: profile.userId },
+        if (!user) {
+            return res.status(404).json({ success: false, message: "Patient user record not found." });
+        }
+
+        const updated = await prisma.user.update({
+            where: { id: user.id },
             data: { isActive: newActive }
         });
+
+        if (req.app.locals.io) {
+            req.app.locals.io.emit('patientStatusUpdate', {
+                userId: user.id,
+                isActive: newActive
+            });
+        }
 
         return res.status(200).json({
             success: true,
@@ -212,6 +228,7 @@ exports.setStatus = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to update active status.", debug: error.message });
     }
 };
+
 
 /**
  * Update patient profile details.

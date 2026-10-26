@@ -225,7 +225,16 @@ const result = await prisma.$transaction(async (tx) => {
 ### 5.3 Live Road-Network Telemetry & ETA
 - MedRelay calculates true road distance and travel duration via Open Source Routing Machine (OSRM) APIs, accounting for bridges, one-way networks, and vehicular detours rather than misleading straight-line distances.
 
+### 5.4 Edge AI Emergency Triage & Clinical Handover (Ollama Integration)
+- **Local On-Premise LLM Engine:** Powered by a local Ollama service (`http://127.0.0.1:11434`, model: `phi3:latest`), eliminating dependency on external commercial cloud AI APIs.
+- **Natural Language Symptom Triage (`/api/ai/triage`):** Analyzes free-form patient and bystander symptom descriptions in real time, classifies urgency (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), and automatically recommends the optimal clinical specialization (`Cardiology`, `Trauma Surgery`, `Pediatrics`, `Orthopedics`, `General Emergency`).
+- **Immediate Pre-Arrival First Aid Guidance:** Generates instant step-by-step pre-arrival life-saving instructions (e.g., CPR rhythm, bleeding compression, semi-Fowler position) for bystanders while responders are en route.
+- **Pre-Arrival Doctor Clinical Briefing (`/api/ai/briefing/:alertId`):** Automatically synthesizes patient age, verified blood group, reported symptoms, and pre-existing medical history to flag critical contraindications (e.g. penicillin or aspirin allergies) and formulate initial scene stabilization steps.
+- **Privacy & Statutory Compliance:** Because inference runs strictly on-device, zero Protected Health Information (PHI) is transmitted to third-party AI cloud vendors, upholding Section 7(f) of the **India DPDP Act 2023** and **HIPAA** clinical data isolation principles.
+- **Deterministic Rule Fallback:** If the local Ollama instance is ever unreachable or paused, an integrated medical keywords heuristic fallback activates seamlessly without interrupting emergency dispatch.
+
 ---
+
 
 ## 6. Security, Authentication & RBAC
 

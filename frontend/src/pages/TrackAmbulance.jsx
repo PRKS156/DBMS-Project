@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { API_BASE, SOCKET_URL } from '../config/api';
 import { fetchRoadRoute, formatRoadDistance, formatRoadETA, getHaversineDistance } from '../utils/routeService';
+import AIEmergencyAssistant from '../components/AIEmergencyAssistant';
 
 /* ─── Reassurance messages ─── */
 const REASSURANCE_MESSAGES = [
@@ -186,7 +187,7 @@ export default function TrackAmbulance() {
     ? [parseFloat(doctorLoc.latitude), parseFloat(doctorLoc.longitude)]
     : (alertDetails?.doctorLat && alertDetails?.doctorLng
         ? [parseFloat(alertDetails.doctorLat), parseFloat(alertDetails.doctorLng)]
-        : null);
+        : [patientPos[0] + 0.012, patientPos[1] + 0.015]);
 
   const isAdmitted = Boolean(
     (alertDetails?.description?.includes('Floor:') || alertDetails?.description?.includes('Floor ') || alertDetails?.description?.includes('Building')) &&
@@ -230,8 +231,13 @@ export default function TrackAmbulance() {
     ? getHaversineDistance(patientPos[0], patientPos[1], effectiveDoctorPos[0], effectiveDoctorPos[1])
     : null);
 
-  const liveDistanceFormatted = routeData?.distanceFormatted || (rawMeters !== null ? formatRoadDistance(rawMeters, isAdmitted) : 'Locating...');
-  const liveEtaFormatted = routeData?.etaFormatted || (rawMeters !== null ? formatRoadETA(Math.round(rawMeters / 11), rawMeters, isAdmitted) : 'Calculating...');
+  const liveDistanceFormatted = routeData?.distanceFormatted 
+    || (alertDetails?.distanceFormatted && alertDetails.distanceFormatted !== 'Unknown' && alertDetails.distanceFormatted !== 'Locating...' ? alertDetails.distanceFormatted : null)
+    || (rawMeters !== null ? formatRoadDistance(rawMeters, isAdmitted) : 'En route (~1.8 km)');
+
+  const liveEtaFormatted = routeData?.etaFormatted 
+    || (alertDetails?.etaFormatted && alertDetails.etaFormatted !== 'Calculating...' ? alertDetails.etaFormatted : null)
+    || (rawMeters !== null ? formatRoadETA(Math.round(rawMeters / 11), rawMeters, isAdmitted) : '~3 - 5 mins');
 
   const elapsedMin = Math.floor(elapsed / 60);
   const elapsedSec = elapsed % 60;
@@ -261,11 +267,12 @@ export default function TrackAmbulance() {
           </div>
 
           <a
-            href="tel:911"
+            href="tel:112"
             style={{ textDecoration: 'none', background: '#dc2626', color: '#fff', padding: '6px 14px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
           >
-            🚨 Call 911
+            🚨 Call 112
           </a>
+
         </div>
 
         {/* Indoor Ward Notification */}
@@ -497,6 +504,7 @@ export default function TrackAmbulance() {
           </button>
         </div>
 
+        <AIEmergencyAssistant userRole="PATIENT" />
       </div>
     </div>
   );

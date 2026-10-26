@@ -14,7 +14,10 @@ export default function Login() {
       const res = await axios.post(`${API_BASE}/api/auth/login`, { email, password });
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('role', res.data.role);
-      navigate('/dashboard');
+      if (res.data.userId) localStorage.setItem('userId', res.data.userId);
+      if (res.data.name) localStorage.setItem('name', res.data.name);
+      navigate(res.data.role === 'DOCTOR' ? '/doctor-dashboard' : (res.data.role === 'PATIENT' ? '/patient-dashboard' : '/admin-dashboard'));
+
     } catch (err) {
       alert('Login failed. Please check your credentials.');
     }

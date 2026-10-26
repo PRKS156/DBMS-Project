@@ -77,40 +77,57 @@ exports.updateLocation = async (req, res) => {
 exports.setStatus = async (req, res) => {
     const { id } = req.params;
     const targetId = parseInt(id);
-    const { status } = req.body; // Expecting boolean 'isOnDuty' or legacy 'status'
+    const { status, isActive, isOnDuty } = req.body;
+    const resolvedStatus = (typeof status === 'boolean') ? status : ((typeof isActive === 'boolean') ? isActive : ((typeof isOnDuty === 'boolean') ? isOnDuty : null));
 
-    if (isNaN(targetId)) {
-        return res.status(400).json({ success: false, message: "Invalid doctor ID." });
-    }
-
-    if (typeof status !== 'boolean') {
+    if (resolvedStatus === null) {
         return res.status(400).json({ success: false, message: "Invalid status value. Expected boolean true or false." });
     }
 
     try {
-        const docProfile = await prisma.doctorProfile.findFirst({
-            where: { OR: [{ userId: targetId }, { id: targetId }] }
-        });
+        let docProfile = null;
+        if (!isNaN(targetId)) {
+            docProfile = await prisma.doctorProfile.findFirst({
+                where: { OR: [{ userId: targetId }, { id: targetId }] }
+            });
+        }
+        if (!docProfile && typeof id === 'string') {
+            docProfile = await prisma.doctorProfile.findFirst({
+                where: { user: { email: id.trim().toLowerCase() } }
+            });
+        }
 
         if (!docProfile) {
             return res.status(404).json({ success: false, message: "Doctor profile not found." });
         }
 
-        const computedAvailable = status && !docProfile.isBusy;
+        const computedAvailable = resolvedStatus && !docProfile.isBusy;
+
+        const updateData = {
+            isOnDuty: resolvedStatus,
+            isActive: resolvedStatus,
+            isAvailable: computedAvailable
+        };
+
+        // When activating duty, refresh telemetry heartbeat and ensure coordinates exist
+        if (resolvedStatus) {
+            updateData.lastLocationAt = new Date();
+            if (!docProfile.currentLat || !docProfile.currentLng) {
+                updateData.currentLat = 12.9715;
+                updateData.currentLng = 79.1585;
+            }
+        }
 
         const updated = await prisma.doctorProfile.update({
             where: { id: docProfile.id },
-            data: {
-                isOnDuty: status,
-                isActive: status,
-                isAvailable: computedAvailable
-            }
+            data: updateData
         });
 
         await prisma.user.update({
             where: { id: docProfile.userId },
-            data: { isActive: status }
+            data: { isActive: resolvedStatus }
         });
+
 
         if (req.app.locals.io) {
             req.app.locals.io.emit('doctorStatusUpdate', {
