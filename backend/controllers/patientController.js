@@ -95,14 +95,14 @@ exports.loginPatient = async (req, res) => {
             const targetId = parseInt(patientId);
             if (!isNaN(targetId)) {
                 profile = await prisma.patientProfile.findFirst({
-                    where: { OR: [{ id: targetId }, { userId: targetId }] },
+                    where: { userId: targetId },
                     include: { user: true }
                 });
                 if (profile) user = profile.user;
             }
         }
 
-        if (!user || !profile) {
+        if (!user || !user.isActive || !profile) {
             return res.status(401).json({ success: false, message: "No patient account found with those credentials." });
         }
 
@@ -113,7 +113,7 @@ exports.loginPatient = async (req, res) => {
 
         const token = jwt.sign(
             { userId: user.id, role: user.role, profileId: profile.id },
-            process.env.JWT_SECRET || 'supersecretkey',
+            process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
@@ -152,7 +152,7 @@ exports.getPatientProfile = async (req, res) => {
         let profile = null;
         if (!isNaN(targetId)) {
             profile = await prisma.patientProfile.findFirst({
-                where: { OR: [{ id: targetId }, { userId: targetId }] },
+                where: { userId: targetId },
                 include: { user: { select: { id: true, email: true, isActive: true, createdAt: true } } }
             });
         }
@@ -193,7 +193,7 @@ exports.setStatus = async (req, res) => {
         let user = null;
         if (!isNaN(targetId)) {
             user = await prisma.user.findFirst({
-                where: { OR: [{ id: targetId }, { patientProfile: { id: targetId } }] }
+                where: { id: targetId }
             });
         }
         if (!user && typeof id === 'string') {
@@ -244,7 +244,7 @@ exports.updatePatientProfile = async (req, res) => {
 
     try {
         const profile = await prisma.patientProfile.findFirst({
-            where: { OR: [{ id: targetId }, { userId: targetId }] }
+            where: { userId: targetId }
         });
 
         if (!profile) {

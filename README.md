@@ -230,7 +230,7 @@ const result = await prisma.$transaction(async (tx) => {
 - **Natural Language Symptom Triage (`/api/ai/triage`):** Analyzes free-form patient and bystander symptom descriptions in real time, classifies urgency (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), and automatically recommends the optimal clinical specialization (`Cardiology`, `Trauma Surgery`, `Pediatrics`, `Orthopedics`, `General Emergency`).
 - **Immediate Pre-Arrival First Aid Guidance:** Generates instant step-by-step pre-arrival life-saving instructions (e.g., CPR rhythm, bleeding compression, semi-Fowler position) for bystanders while responders are en route.
 - **Pre-Arrival Doctor Clinical Briefing (`/api/ai/briefing/:alertId`):** Automatically synthesizes patient age, verified blood group, reported symptoms, and pre-existing medical history to flag critical contraindications (e.g. penicillin or aspirin allergies) and formulate initial scene stabilization steps.
-- **Privacy & Statutory Compliance:** Because inference runs strictly on-device, zero Protected Health Information (PHI) is transmitted to third-party AI cloud vendors, upholding Section 7(f) of the **India DPDP Act 2023** and **HIPAA** clinical data isolation principles.
+- **AI Data Flow:** When configured exclusively for local Ollama, clinical context remains local only when cloud providers are disabled, This configuration alone does not establish regulatory compliance. Cloud AI providers receive prompt content when enabled; use only approved data and providers.
 - **Deterministic Rule Fallback:** If the local Ollama instance is ever unreachable or paused, an integrated medical keywords heuristic fallback activates seamlessly without interrupting emergency dispatch.
 
 ---
@@ -261,7 +261,7 @@ In compliance with relational best practices, **all user roles exist in a single
 ├── Layer              ├── Technology
 ├── Frontend           │   React 19 (SPA), Vite 8, React Router 7, Recharts, Lucide Icons
 ├── Backend Server     │   Node.js 20, Express.js 4, Socket.io 4 (Real-Time WebSockets)
-├── Database & ORM     │   PostgreSQL (Supabase Managed Cloud), Prisma ORM 6
+├── Database & ORM     │   PostgreSQL (Supabase Managed Cloud), Prisma ORM 5.22
 ├── Routing Telemetry  │   OSRM Road-Routing Engine, HTML5 Geolocation API
 ├── Authentication     │   JSON Web Tokens (JWT), BCrypt.js (10 Rounds)
 ├── Deployment Cloud   │   Vercel (Frontend), Render (Backend), Supabase AWS (Database)

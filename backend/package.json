@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "seed": "node prisma/seed.js",
-    "postinstall": "node_modules/.bin/prisma generate"
+    "postinstall": "node_modules/.bin/prisma generate",
+    "test": "node --test tests/security.test.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

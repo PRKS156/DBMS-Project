@@ -14,13 +14,17 @@ const authenticateToken = (req, res, next) => {
         });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET || 'supersecretkey', (err, user) => {
+    jwt.verify(token, process.env.JWT_SECRET, async (err, user) => {
         if (err) {
             return res.status(403).json({
                 success: false,
                 message: "Invalid or expired authentication token."
             });
         }
+        try {
+            const account = await require('../config/db').user.findUnique({ where: { id: user.userId } });
+            if (!account?.isActive || account.role !== user.role) return res.status(403).json({ error: 'Account unavailable' });
+        } catch { return res.status(503).json({error: 'Authentication unavailable'}); }
         req.user = user;
         next();
     });

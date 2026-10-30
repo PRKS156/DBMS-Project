@@ -5,8 +5,10 @@ const jwt = require('jsonwebtoken');
 exports.register = async (req, res) => {
   try {
     const { email, password, role, name, phone, specialization, age, gender, bloodGroup } = req.body;
+    if (typeof email !== 'string' || !email.includes('@') || typeof password !== 'string' || password.length < 8) return res.status(400).json({error: 'Valid email and password of at least 8 characters required'});
     const hashedPassword = await bcrypt.hash(password, 10);
     
+    if (role && !['PATIENT', 'DOCTOR'].includes(role)) return res.status(403).json({error: 'Privileged accounts require administrator provisioning'});
     const assignedRole = role || 'PATIENT';
 
     // Use a transaction to create the user and their profile
@@ -55,7 +57,7 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
+    if (!user || !user.isActive) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const isValid = await bcrypt.compare(password, user.password);
@@ -74,7 +76,7 @@ exports.login = async (req, res) => {
 
     const token = jwt.sign(
       { userId: user.id, role: user.role },
-      process.env.JWT_SECRET || 'supersecretkey',
+      process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
     res.json({ message: 'Login successful', token, role: user.role, userId: user.id, name: fullName });
@@ -137,8 +139,8 @@ exports.demoLogin = async (req, res) => {
     if (targetUser.role === 'ADMIN') fullName = role === 'DISPATCHER' ? 'Regional Dispatch Controller' : 'Chief Medical Administrator';
 
     const token = jwt.sign(
-      { userId: targetUser.id, role: role === 'DISPATCHER' ? 'DISPATCHER' : targetUser.role },
-      process.env.JWT_SECRET || 'supersecretkey',
+      { userId: targetUser.id, role: targetUser.role },
+      process.env.JWT_SECRET,
       { expiresIn: '8h' }
     );
 

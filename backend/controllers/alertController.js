@@ -28,7 +28,7 @@ exports.getHospitals = async (req, res) => {
         });
         return res.status(200).json({ success: true, hospitals });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to fetch hospitals.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to fetch hospitals.", debug: error.message });
     }
 };
 
@@ -164,18 +164,18 @@ exports.triggerAlert = async (req, res) => {
 
                 const trackingToken = jwt.sign(
                     { alertId: wardEscalatedAlert.newAlert.id, role: 'ALERT_TRACKER' },
-                    process.env.JWT_SECRET || 'supersecretkey',
+                    process.env.JWT_SECRET,
                     { expiresIn: '2h' }
                 );
 
                 if (req.app.locals.io) {
-                    req.app.locals.io.emit('wardEscalation', {
+                    req.app.locals.io.to('staff').emit('wardEscalation', {
                         alertId: wardEscalatedAlert.newAlert.id,
                         hospitalName: chosenHospitalName,
                         hospitalId: parseInt(hospitalId),
                         description: wardEscalatedAlert.newAlert.description
                     });
-                    req.app.locals.io.emit('dispatcherAlertUpdate', {
+                    req.app.locals.io.to('staff').emit('dispatcherAlertUpdate', {
                         alertId: wardEscalatedAlert.newAlert.id,
                         status: 'PENDING',
                         wardEscalation: true
@@ -452,13 +452,13 @@ exports.triggerAlert = async (req, res) => {
         // Critique #18: Issue signed per-alert tracking token (short 2h expiry to mitigate URL leak risk)
         const trackingToken = jwt.sign(
             { alertId: result.newAlert.id, role: 'ALERT_TRACKER' },
-            process.env.JWT_SECRET || 'supersecretkey',
+            process.env.JWT_SECRET,
             { expiresIn: '2h' }
         );
 
         if (req.app.locals.io) {
             req.app.locals.io.to(`alert_${result.newAlert.id}`).emit('alertUpdate', { status: 'PENDING' });
-            req.app.locals.io.emit('newEmergencyAlert', {
+            req.app.locals.io.to('staff').emit('newEmergencyAlert', {
                 alertId: result.newAlert.id,
                 status: 'PENDING',
                 patientId: patientProfileId,
@@ -499,7 +499,7 @@ exports.triggerAlert = async (req, res) => {
             });
         }
         console.error("❌ Alert Trigger Failure:", error);
-        return res.status(500).json({ success: false, message: "Database transaction failed.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Database transaction failed.", debug: error.message });
     }
 };
 
@@ -630,7 +630,7 @@ exports.getAlertStatus = async (req, res) => {
             }
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to fetch alert status.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to fetch alert status.", debug: error.message });
     }
 };
 
@@ -770,17 +770,18 @@ exports.getDoctorAlerts = async (req, res) => {
 
         return res.status(200).json({ success: true, alerts: mappedAlerts });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to fetch alerts.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to fetch alerts.", debug: error.message });
     }
 };
 
 exports.acknowledgeAlert = async (req, res) => {
     const { id } = req.params;
     try {
-        await prisma.emergencyAlert.update({
-            where: { id: parseInt(id) },
+        const transition = await prisma.emergencyAlert.updateMany({
+            where: { id: parseInt(id), status: { in: ["PENDING"] }, ...(req.user?.role === 'DOCTOR' ? {dispatchRecord: {is: {doctor: {is: {userId: req.user.userId}}}}} : {}) },
             data: { status: 'DISPATCHED' }
         });
+            if (!transition.count) throw Object.assign(new Error('Invalid or concurrent alert transition'), {status:409});
 
         if (req.app.locals.io) {
             req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'DISPATCHED' });
@@ -788,7 +789,7 @@ exports.acknowledgeAlert = async (req, res) => {
 
         return res.status(200).json({ success: true, message: "Alert acknowledged. Doctor en route." });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to acknowledge alert.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to acknowledge alert.", debug: error.message });
     }
 };
 
@@ -805,10 +806,11 @@ exports.transportAlert = async (req, res) => {
         }
 
         await prisma.$transaction(async (tx) => {
-            await tx.emergencyAlert.update({
-                where: { id: alertId },
+            const transition = await tx.emergencyAlert.updateMany({
+                where: { id: alertId, status: { in: ["DISPATCHED"] }, ...(req.user?.role === 'DOCTOR' ? {dispatchRecord: {is: {doctor: {is: {userId: req.user.userId}}}}} : {}) },
                 data: { status: 'TRANSPORTING' }
             });
+            if (!transition.count) throw Object.assign(new Error('Invalid or concurrent alert transition'), {status:409});
 
             if (hospitalId) {
                 await tx.dispatchRecord.updateMany({
@@ -827,7 +829,7 @@ exports.transportAlert = async (req, res) => {
                 hospitalId: hospitalId ? parseInt(hospitalId) : undefined,
                 hospitalName: chosenHospitalName
             });
-            req.app.locals.io.emit('dispatcherAlertUpdate', {
+            req.app.locals.io.to('staff').emit('dispatcherAlertUpdate', {
                 alertId: alertId,
                 status: 'TRANSPORTING',
                 hospitalName: chosenHospitalName
@@ -839,7 +841,7 @@ exports.transportAlert = async (req, res) => {
             message: chosenHospitalName ? `Patient secured; en route to ${chosenHospitalName}.` : "Patient secured; en route to hospital."
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to update transport status.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to update transport status.", debug: error.message });
     }
 };
 
@@ -850,13 +852,14 @@ exports.cancelAlert = async (req, res) => {
     const { reason } = req.body;
     try {
         await prisma.$transaction(async (tx) => {
-            await tx.emergencyAlert.update({
-                where: { id: alertId },
+            const transition = await tx.emergencyAlert.updateMany({
+                where: { id: alertId, status: { in: ["PENDING","DISPATCHED","TRANSPORTING"] }, ...(req.user?.role === 'DOCTOR' ? {dispatchRecord: {is: {doctor: {is: {userId: req.user.userId}}}}} : {}) },
                 data: {
                     status: 'CANCELLED',
                     description: reason ? `[CANCELLED: ${reason}]` : undefined
                 }
             });
+            if (!transition.count) throw Object.assign(new Error('Invalid or concurrent alert transition'), {status:409});
 
             const dispatch = await tx.dispatchRecord.findUnique({
                 where: { alertId: alertId }
@@ -886,12 +889,12 @@ exports.cancelAlert = async (req, res) => {
 
         if (req.app.locals.io) {
             req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'CANCELLED', reason });
-            req.app.locals.io.emit('dispatcherAlertUpdate', { alertId, status: 'CANCELLED' });
+            req.app.locals.io.to('staff').emit('dispatcherAlertUpdate', { alertId, status: 'CANCELLED' });
         }
 
         return res.status(200).json({ success: true, message: "Emergency alert cancelled. Resources released." });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to cancel alert.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to cancel alert.", debug: error.message });
     }
 };
 
@@ -900,10 +903,11 @@ exports.completeAlert = async (req, res) => {
     const alertId = parseInt(id);
     try {
         await prisma.$transaction(async (tx) => {
-            await tx.emergencyAlert.update({
-                where: { id: alertId },
+            const transition = await tx.emergencyAlert.updateMany({
+                where: { id: alertId, status: { in: ["DISPATCHED","TRANSPORTING"] }, ...(req.user?.role === 'DOCTOR' ? {dispatchRecord: {is: {doctor: {is: {userId: req.user.userId}}}}} : {}) },
                 data: { status: 'COMPLETED' }
             });
+            if (!transition.count) throw Object.assign(new Error('Invalid or concurrent alert transition'), {status:409});
 
             await tx.dispatchRecord.updateMany({
                 where: { alertId: alertId },
@@ -937,12 +941,12 @@ exports.completeAlert = async (req, res) => {
 
         if (req.app.locals.io) {
             req.app.locals.io.to(`alert_${id}`).emit('alertUpdate', { status: 'COMPLETED' });
-            req.app.locals.io.emit('dispatcherAlertUpdate', { alertId, status: 'COMPLETED' });
+            req.app.locals.io.to('staff').emit('dispatcherAlertUpdate', { alertId, status: 'COMPLETED' });
         }
 
         return res.status(200).json({ success: true, message: "Emergency marked as completed. Clinician and ambulance released." });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to complete alert.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to complete alert.", debug: error.message });
     }
 };
 
@@ -995,13 +999,14 @@ exports.getPatientActiveAlert = async (req, res) => {
             }
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to fetch active alert.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to fetch active alert.", debug: error.message });
     }
 };
 
 exports.submitFeedback = async (req, res) => {
     const { id } = req.params;
-    const { rating, comments, userId } = req.body;
+    const { rating, comments } = req.body;
+    if (!Number.isInteger(Number(rating)) || Number(rating) < 1 || Number(rating) > 5) return res.status(400).json({error: 'Rating must be 1–5'});
     try {
         const dispatch = await prisma.dispatchRecord.findUnique({
             where: { alertId: parseInt(id) }
@@ -1016,7 +1021,7 @@ exports.submitFeedback = async (req, res) => {
             },
             create: {
                 dispatchRecordId: dispatch.id,
-                userId: parseInt(userId) || 1,
+                userId: req.user.userId,
                 rating: parseInt(rating) || 5,
                 comments: comments || ''
             }
@@ -1024,7 +1029,7 @@ exports.submitFeedback = async (req, res) => {
 
         return res.status(200).json({ success: true, message: "Feedback submitted successfully.", feedback });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to submit feedback.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to submit feedback.", debug: error.message });
     }
 };
 
@@ -1038,7 +1043,7 @@ exports.getActiveEmergenciesView = async (req, res) => {
         `);
         return res.status(200).json({ success: true, emergencies });
     } catch (error) {
-        return res.status(500).json({ success: false, message: "Failed to fetch active emergencies view.", debug: error.message });
+        return res.status(error.status || 500).json({ success: false, message: "Failed to fetch active emergencies view.", debug: error.message });
     }
 };
 
@@ -1066,6 +1071,10 @@ exports.reassignAlert = async (req, res) => {
         const newHospId = hospitalId ? parseInt(hospitalId) : null;
 
         await prisma.$transaction(async (tx) => {
+            const rows = await tx.$queryRaw`SELECT status FROM "EmergencyAlert" WHERE id = ${alertId} FOR UPDATE`;
+            if (!rows.length || !['PENDING', 'DISPATCHED'].includes(rows[0].status)) throw Object.assign(new Error('Alert is closed'), {status:409});
+            const fresh = await tx.dispatchRecord.findUnique({where:{alertId}});
+            if (!fresh || fresh.doctorId !== currentDispatch.doctorId || fresh.vehicleId !== currentDispatch.vehicleId) throw Object.assign(new Error('Assignment changed; retry'), {status:409});
             let newDocProfile = null;
             let newVehicle = null;
             let targetHospital = null;
@@ -1125,7 +1134,8 @@ exports.reassignAlert = async (req, res) => {
                 if (!newVehicle || !newVehicle.isAvailable) {
                     throw new Error("Target vehicle is not available.");
                 }
-                await tx.vehicle.update({ where: { id: newVehId }, data: { isAvailable: false } });
+                const claim = await tx.vehicle.updateMany({ where: { id: newVehId, isAvailable: true }, data: { isAvailable: false } });
+                if (!claim.count) throw new Error('Vehicle already allocated');
                 if (currentDispatch.vehicleId) {
                     await tx.vehicle.update({ where: { id: currentDispatch.vehicleId }, data: { isAvailable: true } });
                 }
@@ -1161,12 +1171,12 @@ exports.reassignAlert = async (req, res) => {
 
         if (req.app.locals.io) {
             req.app.locals.io.to(`alert_${alertId}`).emit('alertUpdate', { status: 'DISPATCHED', reallocated: true });
-            req.app.locals.io.emit('dispatcherAlertUpdate', { alertId, reallocated: true });
+            req.app.locals.io.to('staff').emit('dispatcherAlertUpdate', { alertId, reallocated: true });
         }
 
         return res.status(200).json({ success: true, message: "Alert reassigned successfully with atomic resource handoff." });
     } catch (error) {
-        return res.status(400).json({ success: false, message: "Failed to reassign alert.", debug: error.message });
+        return res.status(error.status || 400).json({ success: false, message: "Failed to reassign alert.", debug: error.message });
     }
 };
 
@@ -1189,6 +1199,7 @@ exports.retryPendingAlerts = async (io) => {
 
             // Atomic claim transaction: Search, select, lock doctor & vehicle inside the same transaction
             const matched = await prisma.$transaction(async (tx) => {
+                const locked = await tx.$queryRaw`SELECT id FROM "EmergencyAlert" WHERE id = ${alert.id} FOR UPDATE`;
                 // Re-verify alert is still pending and unassigned
                 const currentAlert = await tx.emergencyAlert.findUnique({
                     where: { id: alert.id },
@@ -1257,7 +1268,8 @@ exports.retryPendingAlerts = async (io) => {
                 if (!isIndoor) {
                     vehicle = await tx.vehicle.findFirst({ where: { isAvailable: true } });
                     if (vehicle) {
-                        await tx.vehicle.update({ where: { id: vehicle.id }, data: { isAvailable: false } });
+                        const claim = await tx.vehicle.updateMany({ where: { id: vehicle.id, isAvailable: true }, data: { isAvailable: false } });
+                        if (!claim.count) throw new Error('Vehicle already allocated');
                     }
                 }
 
@@ -1297,7 +1309,7 @@ exports.retryPendingAlerts = async (io) => {
                     status: 'PENDING',
                     assignedDoctor: matched.doctor.fullName
                 });
-                io.emit('dispatcherAlertUpdate', {
+                io.to('staff').emit('dispatcherAlertUpdate', {
                     alertId: matched.alert.id,
                     status: 'PENDING',
                     assignedDoctor: matched.doctor.fullName

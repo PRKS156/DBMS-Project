@@ -41,7 +41,7 @@ exports.triageSymptoms = async (req, res) => {
         let patientContext = context || {};
 
         // If patientId provided, fetch clinical history to enrich context
-        if (patientId) {
+        if (patientId && req.user?.userId === Number(patientId)) {
             try {
                 const profile = await prisma.patientProfile.findUnique({
                     where: { userId: parseInt(patientId) }

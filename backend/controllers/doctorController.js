@@ -21,7 +21,7 @@ exports.updateLocation = async (req, res) => {
 
     try {
         const docProfile = await prisma.doctorProfile.findFirst({
-            where: { OR: [{ userId: targetId }, { id: targetId }] }
+            where: { userId: targetId }
         });
 
         if (!docProfile) {
@@ -59,8 +59,7 @@ exports.updateLocation = async (req, res) => {
                     longitude: lng
                 });
             });
-            req.app.locals.io.emit(`doctorLocation_${docProfile.userId}`, { latitude: lat, longitude: lng });
-            req.app.locals.io.emit('doctorLocation', { doctorId: docProfile.userId, latitude: lat, longitude: lng });
+            req.app.locals.io.to('staff').emit('doctorLocation', { doctorId: docProfile.userId, latitude: lat, longitude: lng });
         }
 
         return res.status(200).json({ success: true, message: "Location telemetry updated.", profile: updated });
@@ -88,7 +87,7 @@ exports.setStatus = async (req, res) => {
         let docProfile = null;
         if (!isNaN(targetId)) {
             docProfile = await prisma.doctorProfile.findFirst({
-                where: { OR: [{ userId: targetId }, { id: targetId }] }
+                where: { userId: targetId }
             });
         }
         if (!docProfile && typeof id === 'string') {
@@ -105,7 +104,6 @@ exports.setStatus = async (req, res) => {
 
         const updateData = {
             isOnDuty: resolvedStatus,
-            isActive: resolvedStatus,
             isAvailable: computedAvailable
         };
 
@@ -121,11 +119,6 @@ exports.setStatus = async (req, res) => {
         const updated = await prisma.doctorProfile.update({
             where: { id: docProfile.id },
             data: updateData
-        });
-
-        await prisma.user.update({
-            where: { id: docProfile.userId },
-            data: { isActive: resolvedStatus }
         });
 
 
@@ -164,7 +157,7 @@ exports.getDoctorProfile = async (req, res) => {
 
     try {
         const doc = await prisma.doctorProfile.findFirst({
-            where: { OR: [{ userId: targetId }, { id: targetId }] },
+            where: { userId: targetId },
             include: { user: { select: { id: true, email: true, createdAt: true } } }
         });
 

@@ -1,3 +1,5 @@
+import { installApiFetch } from './utils/apiFetch';
+installApiFetch();
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'

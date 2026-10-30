@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const access = require('../middleware/access');
 const aiController = require('../controllers/aiController');
 
 // Status & health check of local Ollama engine
@@ -9,8 +10,8 @@ router.get('/status', aiController.getStatus);
 router.post('/triage', aiController.triageSymptoms);
 
 // Pre-arrival doctor clinical briefing
-router.get('/briefing/:alertId', aiController.getDoctorBriefing);
-router.post('/briefing', aiController.getDoctorBriefing);
+router.get('/briefing/:alertId', access.alert('doctor'), aiController.getDoctorBriefing);
+router.post('/briefing', access.alert('doctor'), aiController.getDoctorBriefing);
 
 // Emergency medical chat assistant
 router.post('/chat', aiController.chat);

@@ -105,7 +105,7 @@ export default function Dashboard() {
     }
 
     // Connect real-time socket for all roles to keep parallel dashboards synchronized
-    socketRef.current = io(SOCKET_URL);
+    socketRef.current = io(SOCKET_URL, { auth: { token } });
 
     // Doctor status updates (On Duty / Available / Inactive) across parallel sessions
     socketRef.current.on('doctorStatusUpdate', (data) => {

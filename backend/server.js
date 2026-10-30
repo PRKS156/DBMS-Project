@@ -6,6 +6,7 @@ const prisma = require('./config/db');
 const { retryPendingAlerts } = require('./controllers/alertController');
 require('dotenv').config();
 
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) throw new Error('JWT_SECRET must contain at least 32 characters');
 const app = express();
 
 // Critique #8: Trust proxy when behind reverse proxies (Render, Cloudflare, load balancers)
@@ -63,12 +64,13 @@ const io = new Server(server, {
 });
 
 // Critique #18: Socket handshake authentication middleware with JWT verification
-io.use((socket, next) => {
+io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
     if (token) {
         try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretkey');
-            socket.user = decoded;
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const account = await prisma.user.findUnique({where:{id:decoded.userId}});
+            socket.user = account?.isActive && account.role === decoded.role ? decoded : null;
         } catch (err) {
             socket.user = null;
         }
@@ -82,6 +84,7 @@ io.use((socket, next) => {
 const activeDoctorSockets = new Map(); // socket.id -> doctorUserId
 
 io.on('connection', (socket) => {
+    if (['ADMIN', 'DISPATCHER'].includes(socket.user?.role)) socket.join('staff');
     console.log(`🔌 Client connected: ${socket.id} (Authenticated User: ${socket.user?.userId || 'Anonymous'})`);
 
     if (socket.user && socket.user.role === 'DOCTOR') {
@@ -124,7 +127,7 @@ io.on('connection', (socket) => {
                                 message: `Signal restored from responder Dr. ${docProfile.fullName}. Live telemetry resumed.`
                             });
                         });
-                        io.emit('dispatcherAlertUpdate', {
+                        io.to('staff').emit('dispatcherAlertUpdate', {
                             alertId: docProfile.dispatches[0].alertId,
                             doctorSignalRestored: true,
                             doctorId: doctorUserId,
@@ -223,8 +226,8 @@ io.on('connection', (socket) => {
         // 2. Validate cryptographic per-alert tracking token (for patients & guest SOS)
         if (!isAuthorized && trackingToken) {
             try {
-                const decoded = jwt.verify(trackingToken, process.env.JWT_SECRET || 'supersecretkey');
-                if (decoded.alertId === targetId) {
+                const decoded = jwt.verify(trackingToken, process.env.JWT_SECRET);
+                if (decoded.role === 'ALERT_TRACKER' && decoded.alertId === targetId) {
                     isAuthorized = true;
                 }
             } catch (err) {
@@ -247,8 +250,8 @@ io.on('connection', (socket) => {
             } catch (err) {}
         }
 
-        // Allow join if authorized or in dev mode, reject unauthorized eavesdroppers
-        if (isAuthorized || process.env.NODE_ENV !== 'production') {
+        // All environments require participant credentials or a scoped tracking token
+        if (isAuthorized) {
             socket.join(`alert_${targetId}`);
             socket.emit('joinedAlertRoom', { alertId: targetId, authorized: isAuthorized });
             console.log(`🔒 Authorized room join: alert_${targetId} by socket ${socket.id}`);
@@ -295,7 +298,7 @@ io.on('connection', (socket) => {
                                     message: `Telemetric signal lost from responder Dr. ${docProfile.fullName}. Retaining active dispatch while device attempts reconnection.`
                                 });
                             });
-                            io.emit('dispatcherAlertUpdate', {
+                            io.to('staff').emit('dispatcherAlertUpdate', {
                                 alertId: activeDispatches[0].alertId,
                                 doctorSignalLost: true,
                                 doctorId: doctorUserId,
