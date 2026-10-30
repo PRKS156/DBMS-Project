@@ -8,6 +8,9 @@ import AIEmergencyAssistant from '../components/AIEmergencyAssistant';
 import AISymptomTriage from '../components/AISymptomTriage';
 import AIDoctorBriefing from '../components/AIDoctorBriefing';
 
+import TableControls from '../components/TableControls';
+import { queryRows } from '../utils/tableQuery';
+
 const COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
 
@@ -58,33 +61,7 @@ export default function Dashboard() {
   const [doctorAlerts, setDoctorAlerts] = useState([]);
   const [activeAlertId, setActiveAlertId] = useState(null);
   const [activeAlertDetails, setActiveAlertDetails] = useState(null);
-  const [adminAnalytics, setAdminAnalytics] = useState({
-    avgResponseTimeSeconds: 18,
-    totalAlerts: 18,
-    activeAlerts: 1,
-    completedAlerts: 17,
-    totalDoctors: 6,
-    totalPatients: 14,
-    emergencyTypes: [
-      { name: 'Cardiology', value: 8 },
-      { name: 'Trauma Surgery', value: 6 },
-      { name: 'Pediatrics', value: 4 },
-      { name: 'Orthopedics', value: 5 },
-      { name: 'General Emergency', value: 11 }
-    ],
-    areaCases: [
-      { name: 'VIT Main Gate / Katpadi', cases: 9 },
-      { name: 'SJT Technology Tower', cases: 6 },
-      { name: 'Chittoor Bus Stand', cases: 5 },
-      { name: 'Green Circle Sector', cases: 7 },
-      { name: 'Bypass Road Junction', cases: 4 }
-    ],
-    hospitalCases: [
-      { name: 'City General Hospital', cases: 14 },
-      { name: 'VIT Health Centre', cases: 9 },
-      { name: 'Apollo Speciality Care', cases: 7 }
-    ]
-  });
+  const [adminAnalytics, setAdminAnalytics] = useState({ avgResponseTimeSeconds: 0, totalAlerts: 0, activeAlerts: 0, completedAlerts: 0, totalDoctors: 0, totalPatients: 0, emergencyTypes: [], areaCases: [], hospitalCases: [] });
   const [doctorLoc, setDoctorLoc] = useState(null);
   const [docCoords, setDocCoords] = useState(null);
   const [feedbackRating, setFeedbackRating] = useState(5);
@@ -95,6 +72,12 @@ export default function Dashboard() {
 
   const [adminTab, setAdminTab] = useState(role === 'DISPATCHER' ? 'dispatch' : 'directory');
   const [activeEmergenciesList, setActiveEmergenciesList] = useState([]);
+  const [dispatchQuery, setDispatchQuery] = useState({ query: '', status: 'ALL', page: 1, size: 10 });
+  const dispatchResults = queryRows(activeEmergenciesList, dispatchQuery.query, dispatchQuery.status, dispatchQuery.page, dispatchQuery.size);
+  const [doctorsQuery, setDoctorsQuery] = useState({ query: '', status: 'ALL', page: 1, size: 10 });
+  const doctorsResults = queryRows(doctorsList, doctorsQuery.query, doctorsQuery.status, doctorsQuery.page, doctorsQuery.size);
+  const [patientsQuery, setPatientsQuery] = useState({ query: '', status: 'ALL', page: 1, size: 10 });
+  const patientsResults = queryRows(patientsList, patientsQuery.query, patientsQuery.status, patientsQuery.page, patientsQuery.size);
   const [reassignAlertId, setReassignAlertId] = useState(null);
   const [selectedReassignDoc, setSelectedReassignDoc] = useState('');
 
@@ -653,16 +636,16 @@ export default function Dashboard() {
             <span style={{ fontSize: '24px' }}>🧠</span>
             <div>
               <div style={{ fontWeight: '700', fontSize: '0.94rem', color: '#0f2a31' }}>
-                Local AI Engine: <span style={{ color: '#0284c7' }}>Ollama (phi3:latest)</span>
+                AI assistance: <span style={{ color: '#0284c7' }}>Configured provider</span>
               </div>
               <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                On-device clinical triage • Zero PHI cloud network leak • DPDP Act 2023 & HIPAA Compliant
+                Optional AI assistance • Provider depends on configuration • Review suggestions before use
               </div>
             </div>
           </div>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', background: '#dcfce7', color: '#166534', padding: '4px 12px', borderRadius: '12px', fontWeight: 'bold' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 8px #22c55e' }}></span>
-            Ollama AI Online
+            Provider checked on request
           </span>
         </div>
 
@@ -691,6 +674,7 @@ export default function Dashboard() {
             </div>
 
             <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
+              <TableControls label="Dispatch" state={dispatchQuery} setState={setDispatchQuery} result={dispatchResults} statuses={['PENDING', 'DISPATCHED', 'TRANSPORTING']} />
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid #cbd5e1', background: '#f8fafc', color: '#334155' }}>
@@ -705,13 +689,13 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {activeEmergenciesList.length === 0 ? (
+                  {dispatchResults.total === 0 ? (
                     <tr>
                       <td colSpan="8" style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                        🎉 All clear! Zero active emergencies in queue.
+                        No emergencies match the current search and status.
                       </td>
                     </tr>
-                  ) : activeEmergenciesList.map(item => (
+                  ) : dispatchResults.rows.map(item => (
                     <tr key={item.alertId} style={{ borderBottom: '1px solid #e2e8f0' }}>
                       <td style={{ padding: '10px 8px', fontWeight: 'bold' }}>#{item.alertId}</td>
                       <td style={{ padding: '10px 8px' }}>
@@ -815,7 +799,8 @@ export default function Dashboard() {
                 <span className="count-pill">{doctorsList.length} Doctors</span>
               </div>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                <TableControls label="Doctors" state={doctorsQuery} setState={setDoctorsQuery} result={doctorsResults} statuses={['ACTIVE', 'INACTIVE']} />
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #cbd5e1', background: '#f8fafc', color: '#334155' }}>
                       <th style={{ padding: '10px 8px' }}>Doctor Name</th>
@@ -826,9 +811,9 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {doctorsList.length === 0 ? (
-                      <tr><td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No doctors currently registered.</td></tr>
-                    ) : doctorsList.map(d => (
+                    {doctorsResults.total === 0 ? (
+                      <tr><td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No doctors match the current search and status.</td></tr>
+                    ) : doctorsResults.rows.map(d => (
                       <tr key={d.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '10px 8px', fontWeight: '600' }}>Dr. {d.name}</td>
                         <td style={{ padding: '10px 8px', color: '#475569' }}>{d.email}</td>
@@ -887,7 +872,8 @@ export default function Dashboard() {
                 <span className="count-pill">{patientsList.length} Patients</span>
               </div>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                <TableControls label="Patients" state={patientsQuery} setState={setPatientsQuery} result={patientsResults} statuses={['ACTIVE', 'INACTIVE']} />
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #cbd5e1', background: '#f8fafc', color: '#334155' }}>
                       <th style={{ padding: '10px 8px' }}>Patient Name</th>
@@ -899,9 +885,9 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {patientsList.length === 0 ? (
+                    {patientsResults.total === 0 ? (
                       <tr><td colSpan="6" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No patient accounts registered.</td></tr>
-                    ) : patientsList.map(p => {
+                    ) : patientsResults.rows.map(p => {
                       const isUnknown = !p.bloodGroup || p.bloodGroup === 'Unknown' || p.bloodGroup === 'N/A' || p.bloodGroup === 'null' || p.name?.includes('Bystander') || p.name?.includes('Anonymous') || p.name?.includes('Inpatient') || p.email?.includes('guest');
                       const displayBlood = isUnknown ? 'Unknown' : p.bloodGroup;
                       return (

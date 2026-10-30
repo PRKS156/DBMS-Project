@@ -1,3 +1,5 @@
+if (process.env.ALLOW_DESTRUCTIVE_TESTS !== 'true' || !process.env.TEST_DATABASE_URL) { throw new Error('Use an isolated TEST_DATABASE_URL and ALLOW_DESTRUCTIVE_TESTS=true; this suite deletes test database records.'); }
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 const prisma = require('../config/db.js');
 const http = require('http');
 const express = require('express');
@@ -61,7 +63,7 @@ async function runComprehensiveVerification() {
               });
             }
           }
-        } catch (e) {}
+        } catch (e) { }
       })();
     }
 
@@ -213,7 +215,7 @@ async function runComprehensiveVerification() {
     await prisma.$executeRawUnsafe(`DELETE FROM "EmergencyAlertArchive" WHERE id = $1;`, archAlert.id);
 
     if (!opAlert && !opDispatch && !opFeedback && opAudit.length === 0 &&
-        arcAlert.length > 0 && arcDispatch.length > 0 && arcFeedback.length > 0 && arcAudit.length > 0) {
+      arcAlert.length > 0 && arcDispatch.length > 0 && arcFeedback.length > 0 && arcAudit.length > 0) {
       console.log('  ✅ PASS: Archive procedure executed atomically with zero data loss, archiving AlertStatusAudit and preserving child snapshots.');
       passedTests++;
     } else {
@@ -434,7 +436,7 @@ async function runComprehensiveVerification() {
     if (dispatch1 && dispatch2) {
       // Both got dispatches: Must have different doctors and different vehicles!
       noDoubleBooking = (dispatch1.doctorId !== dispatch2.doctorId) &&
-                        (dispatch1.vehicleId !== dispatch2.vehicleId);
+        (dispatch1.vehicleId !== dispatch2.vehicleId);
     } else if (dispatch1 || dispatch2) {
       // One got dispatched, other safely escalated
       noDoubleBooking = true;
@@ -590,16 +592,16 @@ async function runComprehensiveVerification() {
   } finally {
     server.close();
     // Post-suite database cleanup: ensure zero leftover test alerts or audit rows for evaluators
-    await prisma.feedback.deleteMany({}).catch(() => {});
-    await prisma.dispatchRecord.deleteMany({}).catch(() => {});
-    await prisma.$executeRawUnsafe(`DELETE FROM "AlertStatusAudit";`).catch(() => {});
-    await prisma.emergencyAlert.deleteMany({}).catch(() => {});
+    await prisma.feedback.deleteMany({}).catch(() => { });
+    await prisma.dispatchRecord.deleteMany({}).catch(() => { });
+    await prisma.$executeRawUnsafe(`DELETE FROM "AlertStatusAudit";`).catch(() => { });
+    await prisma.emergencyAlert.deleteMany({}).catch(() => { });
     await prisma.doctorProfile.updateMany({
       data: { isBusy: false, isOnDuty: true, isActive: true, isAvailable: true, lastLocationAt: new Date() }
-    }).catch(() => {});
+    }).catch(() => { });
     await prisma.vehicle.updateMany({
       data: { isAvailable: true }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   console.log('\n================================================================');

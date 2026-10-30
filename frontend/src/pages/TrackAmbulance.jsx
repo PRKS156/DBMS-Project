@@ -164,21 +164,6 @@ export default function TrackAmbulance() {
     }
   }, [browserPos]);
 
-  if (!alertId) {
-    return (
-      <section className="card" style={{ textAlign: 'center', maxWidth: '600px', margin: '40px auto' }}>
-        <div className="heading">
-          <span className="eyebrow">Tracking</span>
-          <h1>No active emergency.</h1>
-          <p className="sub">You need an active emergency alert to track the assigned doctor.</p>
-        </div>
-        <button className="btn teal" onClick={() => navigate('/patient-dashboard')}>
-          Go to Dashboard <span aria-hidden="true">→</span>
-        </button>
-      </section>
-    );
-  }
-
   const patientPos = (alertDetails?.latitude && alertDetails?.longitude)
     ? [parseFloat(alertDetails.latitude), parseFloat(alertDetails.longitude)]
     : (browserPos || [12.97187, 79.16541]);
@@ -196,7 +181,7 @@ export default function TrackAmbulance() {
 
   // Calculate live road route
   useEffect(() => {
-    if (!patientPos || !doctorPos) return;
+    if (!alertId || !patientPos || !doctorPos) return;
     let isCancelled = false;
 
     const loadRoute = async () => {
@@ -222,6 +207,21 @@ export default function TrackAmbulance() {
       clearInterval(interval);
     };
   }, [patientPos?.[0], patientPos?.[1], doctorPos?.[0], doctorPos?.[1], alertId, isAdmitted]);
+
+  if (!alertId) {
+    return (
+      <section className="card" style={{ textAlign: 'center', maxWidth: '600px', margin: '40px auto' }}>
+        <div className="heading">
+          <span className="eyebrow">Tracking</span>
+          <h1>No active emergency.</h1>
+          <p className="sub">You need an active emergency alert to track the assigned doctor.</p>
+        </div>
+        <button className="btn teal" onClick={() => navigate('/patient-dashboard')}>
+          Go to Dashboard <span aria-hidden="true">→</span>
+        </button>
+      </section>
+    );
+  }
 
   const effectiveDoctorPos = (routeData?.adjustedPos && !doctorLoc)
     ? routeData.adjustedPos

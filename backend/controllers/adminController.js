@@ -254,40 +254,12 @@ exports.getAnalytics = async (req, res) => {
             }
         });
 
-        const avgResponseTimeSeconds = respondedCount > 0 ? Math.round(totalResponseTimeMs / respondedCount / 1000) : 18;
+        const avgResponseTimeSeconds = respondedCount > 0 ? Math.round(totalResponseTimeMs / respondedCount / 1000) : 0;
         
         let typeData = Object.keys(emergencyTypes).map(key => ({ name: key, value: emergencyTypes[key] }));
         let areaData = Object.keys(areaCases).map(key => ({ name: key, cases: areaCases[key] }));
 
-        // Provide realistic demo benchmark seed if live database has 0 historical cases
-        if (typeData.length === 0) {
-            typeData = [
-                { name: 'Cardiology', value: 8 },
-                { name: 'Trauma Surgery', value: 6 },
-                { name: 'Pediatrics', value: 4 },
-                { name: 'Orthopedics', value: 5 },
-                { name: 'General Emergency', value: 11 }
-            ];
-        }
-
-        if (areaData.length === 0) {
-            areaData = [
-                { name: 'VIT Main Gate / Katpadi', cases: 9 },
-                { name: 'SJT Technology Tower', cases: 6 },
-                { name: 'Chittoor Bus Stand', cases: 5 },
-                { name: 'Green Circle Sector', cases: 7 },
-                { name: 'Bypass Road Junction', cases: 4 }
-            ];
-        }
-
         const hospitalData = Object.keys(hospitalCases).map(key => ({ name: key, cases: hospitalCases[key] }));
-        if (hospitalData.length === 0) {
-            hospitalData.push(
-                { name: 'City General Hospital', cases: 14 },
-                { name: 'VIT Health Centre', cases: 9 },
-                { name: 'Apollo Speciality Care', cases: 7 }
-            );
-        }
 
         return res.status(200).json({
             success: true,
@@ -400,4 +372,4 @@ exports.togglePatientActive = async (req, res) => {
         console.error("❌ Patient Active Toggle Failure:", error.message);
         return res.status(500).json({ success: false, message: "Failed to update patient active status.", debug: error.message });
     }
-};
+};
